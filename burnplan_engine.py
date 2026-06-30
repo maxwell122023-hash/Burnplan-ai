@@ -8,6 +8,7 @@ import os
 import re
 import requests
 from openpyxl import load_workbook
+from openpyxl.cell.cell import MergedCell
 
 
 TEMPLATE_PATH = Path(__file__).with_name("burn_plan_template.xlsx")
@@ -252,9 +253,20 @@ def fill_template(inputs: BurnInputs, weather: WeatherInputs, output_path: str |
     if inputs.actual_burn_date:
         data["actual_burn_date"] = inputs.actual_burn_date
 
+    def write_cell_safe(cell_ref: str, value: Any) -> None:
+        """Write to the top-left cell when a target cell is inside a merged range."""
+        target = ws[cell_ref]
+        if isinstance(target, MergedCell):
+            for merged_range in ws.merged_cells.ranges:
+                if cell_ref in merged_range:
+                    top_left = ws.cell(row=merged_range.min_row, column=merged_range.min_col)
+                    top_left.value = value
+                    return
+        target.value = value
+
     for key, cell in CELL_MAP.items():
         if key in data and data[key] not in (None, ""):
-            ws[cell] = data[key]
+            write_cell_safe(cell, data[key])
 
     # Add rule-check sheet for review/audit trail.
     if "AI Rule Check" in wb.sheetnames:
