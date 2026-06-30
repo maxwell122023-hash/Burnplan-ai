@@ -8,6 +8,61 @@ from burnplan_engine import BurnInputs, WeatherInputs, fill_template, build_rule
 
 load_dotenv()
 
+ALABAMA_COUNTIES = [
+    "Autauga", "Baldwin", "Barbour", "Bibb", "Blount", "Bullock", "Butler", "Calhoun", "Chambers",
+    "Cherokee", "Chilton", "Choctaw", "Clarke", "Clay", "Cleburne", "Coffee", "Colbert", "Conecuh",
+    "Coosa", "Covington", "Crenshaw", "Cullman", "Dale", "Dallas", "DeKalb", "Elmore", "Escambia",
+    "Etowah", "Fayette", "Franklin", "Geneva", "Greene", "Hale", "Henry", "Houston", "Jackson",
+    "Jefferson", "Lamar", "Lauderdale", "Lawrence", "Lee", "Limestone", "Lowndes", "Macon", "Madison",
+    "Marengo", "Marion", "Marshall", "Mobile", "Monroe", "Montgomery", "Morgan", "Perry", "Pickens",
+    "Pike", "Randolph", "Russell", "Shelby", "St. Clair", "Sumter", "Talladega", "Tallapoosa",
+    "Tuscaloosa", "Walker", "Washington", "Wilcox", "Winston"
+]
+
+WIND_DIRECTIONS = ["", "N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable"]
+
+OVERSTORY_TYPES = [
+    "", "Longleaf pine", "Loblolly pine", "Shortleaf pine", "Mixed pine", "Pine-hardwood",
+    "Bottomland hardwood", "Upland hardwood", "Young plantation", "Open field / grassland", "Other"
+]
+
+UNDERSTORY_TYPES = [
+    "", "Native warm-season grasses", "Broomsedge / old field", "Pine straw / needle litter",
+    "Hardwood brush", "Sweetgum / red maple regeneration", "Privet / invasive brush",
+    "Gallberry / titi / shrub layer", "Light herbaceous cover", "Heavy rough", "Other"
+]
+
+FUEL_TYPES = [
+    "", "Pine litter - light", "Pine litter - moderate", "Pine litter - heavy",
+    "Grass - light", "Grass - moderate", "Grass - heavy",
+    "Old field / broomsedge", "Cutover slash", "Hardwood leaf litter",
+    "Mixed pine-hardwood litter", "Brush / woody understory", "Other"
+]
+
+TOPOGRAPHY_TYPES = ["", "Flat", "Gently rolling", "Rolling", "Steep", "Bottomland", "Ridge / slope", "Mixed"]
+
+BURN_OBJECTIVES = [
+    "Hazardous fuel reduction",
+    "Site preparation",
+    "Hardwood control",
+    "Sweetgum control",
+    "Bradford pear control",
+    "Wildlife habitat improvement",
+    "Native warm-season grass enhancement",
+    "Pine stand management",
+    "Reduce midstory competition",
+    "Improve visibility / access",
+    "Training / demonstration burn",
+    "Other"
+]
+
+def join_selected(items, other_text=""):
+    items = [i for i in items if i and i != "Other"]
+    if other_text.strip():
+        items.append(other_text.strip())
+    return "; ".join(items)
+
+
 st.set_page_config(page_title="BurnPlan AI", layout="wide")
 st.title("BurnPlan AI - Draft Prescribed Burn Plan")
 st.caption("Draft generator for APCO burn plan template. Human review and burn manager approval required before use.")
@@ -23,8 +78,8 @@ with col1:
     st.subheader("Tract & Manager")
     tract_name = st.text_input("Tract Name")
     burn_address = st.text_input("Burn Address")
-    county = st.text_input("County")
-    state = st.text_input("State", value="AL")
+    county = st.selectbox("County", ALABAMA_COUNTIES, index=ALABAMA_COUNTIES.index("Dallas"))
+    state = st.selectbox("State", ["AL"], index=0)
     burn_mgr_name = st.text_input("Burn Manager Name")
     burn_mgr_cert = st.text_input("Burn Manager Cert #")
     burn_mgr_phone = st.text_input("Burn Manager Phone")
@@ -39,15 +94,32 @@ with col2:
     section = st.text_input("Section")
     township = st.text_input("Township")
     range_ = st.text_input("Range")
-    overstory_type = st.text_input("Overstory Type")
-    understory_type = st.text_input("Understory Type")
-    fuel_type_amount = st.text_input("Fuel Type and Amount")
-    topography = st.text_input("Topography")
+    overstory_choice = st.selectbox("Overstory Type", OVERSTORY_TYPES)
+    overstory_other = st.text_input("Other Overstory Type") if overstory_choice == "Other" else ""
+    overstory_type = overstory_other or overstory_choice
+
+    understory_choice = st.selectbox("Understory Type", UNDERSTORY_TYPES)
+    understory_other = st.text_input("Other Understory Type") if understory_choice == "Other" else ""
+    understory_type = understory_other or understory_choice
+
+    fuel_choice = st.selectbox("Fuel Type", FUEL_TYPES)
+    fuel_load = st.selectbox("Fuel Amount / Load", ["", "Light", "Moderate", "Heavy", "Patchy", "Continuous"] )
+    fuel_other = st.text_input("Other Fuel Type") if fuel_choice == "Other" else ""
+    fuel_type_amount = "; ".join([x for x in [fuel_other or fuel_choice, fuel_load] if x])
+
+    topography = st.selectbox("Topography", TOPOGRAPHY_TYPES)
 
 st.subheader("Plan Narrative")
 c1, c2 = st.columns(2)
 with c1:
-    objectives = st.text_area("Objectives", height=90, placeholder="Example: reduce sweetgum/Bradford pear competition, improve native grass response, reduce fuels...")
+    selected_objectives = st.multiselect("Burn Objectives", BURN_OBJECTIVES, default=["Hazardous fuel reduction"])
+    objective_other = st.text_input("Other Objective") if "Other" in selected_objectives else ""
+    objectives = st.text_area(
+        "Objectives Narrative",
+        value=join_selected(selected_objectives, objective_other),
+        height=90,
+        placeholder="Example: reduce sweetgum/Bradford pear competition, improve native grass response, reduce fuels..."
+    )
     special_features = st.text_area("Special Features to Protect", height=90)
     smoke_sensitive_areas = st.text_area("Smoke Sensitive Areas", height=90, placeholder="Homes, highways, schools, hospitals, powerlines, poultry houses, etc.")
 with c2:
@@ -59,12 +131,12 @@ st.subheader("Weather Factors")
 w1, w2, w3 = st.columns(3)
 with w1:
     surface_wind_mph = st.number_input("Surface Wind MPH", min_value=0.0, step=1.0)
-    surface_wind_dir = st.text_input("Surface Wind Direction", placeholder="N, NE, SW...")
+    surface_wind_dir = st.selectbox("Surface Wind Direction", WIND_DIRECTIONS, key="surface_wind_dir")
     min_rh = st.number_input("Min RH %", min_value=0.0, max_value=100.0, step=1.0)
 with w2:
     max_temp_f = st.number_input("Max Temperature °F", min_value=-20.0, max_value=130.0, step=1.0)
     transport_wind_mph = st.number_input("Transport Wind MPH", min_value=0.0, step=1.0)
-    transport_wind_dir = st.text_input("Transport Wind Direction", placeholder="N, NE, SW...")
+    transport_wind_dir = st.selectbox("Transport Wind Direction", WIND_DIRECTIONS, key="transport_wind_dir")
 with w3:
     mixing_height_ft = st.number_input("Mixing Height FT", min_value=0.0, step=100.0)
     dispersion_index = st.number_input("Dispersion Index", min_value=0.0, step=1.0)
