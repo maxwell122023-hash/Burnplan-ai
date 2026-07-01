@@ -103,6 +103,30 @@ class BurnInputs:
     water_sources: str = ""
     roads_access: str = ""
     neighbors: str = ""
+    manpower_equipment: str = ""
+    adversely_affected_areas: str = ""
+    breach_potential: str = ""
+    smoke_precautions: str = ""
+    emergency_resources: str = ""
+    ignition_techniques: str = ""
+    desired_surface_wind: str = ""
+    desired_humidity: str = ""
+    desired_temperature: str = ""
+    desired_transport_wind: str = ""
+    desired_mixing_height: str = ""
+    desired_dispersion_index: str = ""
+    desired_fine_fuel_moisture: str = ""
+    desired_kbdi: str = ""
+    observed_surface_wind: str = ""
+    observed_humidity: str = ""
+    observed_temperature: str = ""
+    observed_transport_wind: str = ""
+    observed_mixing_height: str = ""
+    observed_dispersion_index: str = ""
+    observed_fine_fuel_moisture: str = ""
+    observed_kbdi: str = ""
+    hours_to_complete: str = ""
+    flame_length: str = ""
     start_time: str = ""
     completion_time: str = ""
     permit_number: str = ""
@@ -177,12 +201,12 @@ def basic_ai_draft(inputs: BurnInputs, weather: WeatherInputs) -> Dict[str, str]
     return {
         "special_features": inputs.special_features or f"Protect all marked utilities, boundary lines, SMZs, roads, structures, wildlife openings, and any sensitive resources shown on the attached map.",
         "objectives": objective,
-        "manpower_equipment": f"Minimum crew should be sized for {acres} acres, fuel conditions, and holding needs. Recommended resources include burn manager, ignition personnel, holding crew, UTV/ATV or engine, water tank/pump, hand tools, radios/cell phones, PPE, drip torches, fuel, and mop-up tools.",
-        "adversely_affected_areas": f"Potentially affected areas include {smoke}. Confirm wind direction keeps smoke away from these areas before ignition.",
-        "breach_potential": f"Review all downwind lines, corners, heavy fuel pockets, road edges, and changes in topography. Strengthen weak line sections before ignition and assign holding resources to high-risk points.",
-        "smoke_precautions": f"Burn only with favorable transport/surface winds, adequate mixing height, and acceptable dispersion. Notify appropriate parties as needed. Monitor smoke across {roads} and stop ignition if smoke impacts become unsafe.",
-        "emergency_resources": f"Confirm AFC permit, county 911, local fire department, nearest hospital, law enforcement, {water}, and evacuation/access routes before ignition.",
-        "ignition_techniques": "Use backing fire first along control lines, then flanking/strip-head fire as conditions allow. Adjust firing pattern to maintain desired flame length, smoke lift, and holding safety.",
+        "manpower_equipment": inputs.manpower_equipment or f"Minimum crew should be sized for {acres} acres, fuel conditions, and holding needs. Recommended resources include burn manager, ignition personnel, holding crew, UTV/ATV or engine, water tank/pump, hand tools, radios/cell phones, PPE, drip torches, fuel, and mop-up tools.",
+        "adversely_affected_areas": inputs.adversely_affected_areas or f"Potentially affected areas include {smoke}. Confirm wind direction keeps smoke away from these areas before ignition.",
+        "breach_potential": inputs.breach_potential or f"Review all downwind lines, corners, heavy fuel pockets, road edges, and changes in topography. Strengthen weak line sections before ignition and assign holding resources to high-risk points.",
+        "smoke_precautions": inputs.smoke_precautions or f"Burn only with favorable transport/surface winds, adequate mixing height, and acceptable dispersion. Notify appropriate parties as needed. Monitor smoke across {roads} and stop ignition if smoke impacts become unsafe.",
+        "emergency_resources": inputs.emergency_resources or f"Confirm AFC permit, county 911, local fire department, nearest hospital, law enforcement, {water}, and evacuation/access routes before ignition.",
+        "ignition_techniques": inputs.ignition_techniques or "Use backing fire first along control lines, then flanking/strip-head fire as conditions allow. Adjust firing pattern to maintain desired flame length, smoke lift, and holding safety.",
     }
 
 
@@ -228,7 +252,9 @@ def fill_template(inputs: BurnInputs, weather: WeatherInputs, output_path: str |
     if use_ai:
         draft = optional_openai_polish(draft, inputs, weather)
     data.update(draft)
-    data.update(desired_conditions())
+    for k, v in desired_conditions().items():
+        if not data.get(k):
+            data[k] = v
 
     if weather.surface_wind_mph is not None:
         data["forecast_surface_wind"] = f"{weather.surface_wind_mph:g} mph {weather.surface_wind_dir}".strip()
