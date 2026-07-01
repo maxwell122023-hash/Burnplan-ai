@@ -93,6 +93,7 @@ class BurnInputs:
     latitude: float | None = None
     longitude: float | None = None
     burn_acres: float | None = None
+    burn_type: str = ""
     overstory_type: str = ""
     understory_type: str = ""
     fuel_type_amount: str = ""
@@ -194,6 +195,8 @@ def basic_ai_draft(inputs: BurnInputs, weather: WeatherInputs) -> Dict[str, str]
     """Deterministic draft text. Safe fallback when no API key is configured."""
     acres = f"{inputs.burn_acres:g}" if inputs.burn_acres else "the planned"
     objective = inputs.objectives or "reduce hazardous fuels, improve access/visibility, and support stand and wildlife management objectives"
+    if inputs.burn_type and inputs.burn_type not in objective:
+        objective = f"Burn type: {inputs.burn_type}. " + objective
     smoke = inputs.smoke_sensitive_areas or "nearby residences, public roads, utilities, and other smoke-sensitive areas shown on the burn map"
     water = inputs.water_sources or "available water sources and suppression equipment identified before ignition"
     roads = inputs.roads_access or "primary access roads and interior/exterior firebreaks"

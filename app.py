@@ -20,6 +20,8 @@ ALABAMA_COUNTIES = [
 ]
 
 WIND_DIRECTIONS = ["", "N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable"]
+BURN_TYPES = ["", "Site Prep", "Rangeland", "TSI", "Fuel Reduction", "Wildlife", "Pre-Marking"]
+FIREBREAK_TYPES = ["Blower Line", "Dozer Line", "Hardwood Bottom", "Creek & River", "Handline", "Disced Line"]
 OVERSTORY_TYPES = ["", "Longleaf pine", "Loblolly pine", "Shortleaf pine", "Mixed pine", "Pine-hardwood", "Bottomland hardwood", "Upland hardwood", "Young plantation", "Open field / grassland", "Other"]
 UNDERSTORY_TYPES = ["", "Native warm-season grasses", "Broomsedge / old field", "Pine straw / needle litter", "Hardwood brush", "Sweetgum / red maple regeneration", "Privet / invasive brush", "Gallberry / titi / shrub layer", "Light herbaceous cover", "Heavy rough", "Other"]
 FUEL_TYPES = ["", "Pine litter - light", "Pine litter - moderate", "Pine litter - heavy", "Grass - light", "Grass - moderate", "Grass - heavy", "Old field / broomsedge", "Cutover slash", "Hardwood leaf litter", "Mixed pine-hardwood litter", "Brush / woody understory", "Other"]
@@ -42,8 +44,8 @@ def text_block(label, placeholder="", height=100):
 
 
 st.set_page_config(page_title="BurnPlan AI V2", layout="wide")
-st.title("BurnPlan AI - Version 2 Layout")
-st.caption("Workflow-based burn plan builder. No elevation field included. Draft only — final review by authorized burn manager required.")
+st.title("BurnPlan AI - Professional Forester Edition")
+st.caption("Workflow-based prescribed fire planning software for foresters and burn managers. Draft only — final review by the responsible burn manager required.")
 
 with st.sidebar:
     st.header("Controls")
@@ -51,7 +53,7 @@ with st.sidebar:
     st.warning("This tool drafts a plan. It does not replace permits, field verification, or go/no-go decisions.")
     st.divider()
     st.write("Template coverage")
-    st.caption("This layout now covers the main APCO template sections: tract info, unit description, objectives, manpower/equipment, smoke, breach potential, weather, ignition, permit, and final record.")
+    st.caption("This layout covers the core professional prescribed-fire workflow: project information, burn unit description, objectives, personnel/equipment, smoke, breach potential, weather, ignition, permit, and final record.")
 
 tabs = st.tabs([
     "1 Project Info",
@@ -78,6 +80,7 @@ with tabs[0]:
         latitude = st.number_input("Latitude", value=32.4074, format="%.6f")
         longitude = st.number_input("Longitude", value=-87.0211, format="%.6f")
         burn_acres = st.number_input("Burn Acres", min_value=0.0, step=1.0)
+        burn_type = st.selectbox("Burn Type", BURN_TYPES)
         section = st.text_input("Section")
         township = st.text_input("Township")
         range_ = st.text_input("Range")
@@ -113,7 +116,11 @@ with tabs[3]:
         fuel_type_amount = "; ".join([x for x in [fuel_other or fuel_choice, fuel_load] if x])
         topography = st.selectbox("Topography", TOPOGRAPHY_TYPES)
     with c2:
-        roads_access = st.text_area("Roads / Access / Firebreaks", height=140, placeholder="Primary access, interior roads, exterior breaks, weak points, gates, bridges, etc.")
+        selected_firebreaks = st.multiselect("Firebreak Types (select all that apply)", FIREBREAK_TYPES)
+        primary_firebreak = st.selectbox("Primary Firebreak", [""] + FIREBREAK_TYPES)
+        firebreak_condition = st.selectbox("Firebreak Condition", ["", "Excellent", "Good", "Fair", "Needs Improvement"])
+        firebreak_notes = st.text_area("Firebreak Notes / Needed Prep", height=90, placeholder="Examples: blow lines before ignition, disk west boundary, improve creek crossing, check dozer line corners.")
+        roads_access_notes = st.text_area("Roads / Access", height=90, placeholder="Primary access, interior roads, weak points, gates, bridges, staging areas, etc.")
         water_sources = st.text_area("Water Sources / Suppression Resources", height=120, placeholder="Ponds, hydrants, tanks, engines, pumps, dozer access, etc.")
 
 with tabs[4]:
@@ -245,6 +252,19 @@ for idx, (status, item, note) in enumerate(build_rule_check(weather)):
         else:
             st.info(f"{item}: {note}")
 
+firebreak_summary_parts = []
+if selected_firebreaks:
+    firebreak_summary_parts.append("Firebreak types: " + "; ".join(selected_firebreaks))
+if primary_firebreak:
+    firebreak_summary_parts.append("Primary firebreak: " + primary_firebreak)
+if firebreak_condition:
+    firebreak_summary_parts.append("Firebreak condition: " + firebreak_condition)
+if firebreak_notes:
+    firebreak_summary_parts.append("Firebreak prep/notes: " + firebreak_notes)
+if roads_access_notes:
+    firebreak_summary_parts.append("Roads/access: " + roads_access_notes)
+roads_access = "; ".join(firebreak_summary_parts)
+
 inputs = BurnInputs(
     tract_name=tract_name,
     burn_address=burn_address,
@@ -261,6 +281,7 @@ inputs = BurnInputs(
     latitude=latitude,
     longitude=longitude,
     burn_acres=burn_acres,
+    burn_type=burn_type,
     overstory_type=overstory_type,
     understory_type=understory_type,
     fuel_type_amount=fuel_type_amount,
