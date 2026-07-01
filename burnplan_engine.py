@@ -87,9 +87,6 @@ class BurnInputs:
     burn_mgr_phone: str = ""
     executers_mailing_address: str = ""
     prepared_by: str = ""
-    section: str = ""
-    township: str = ""
-    range: str = ""
     latitude: float | None = None
     longitude: float | None = None
     burn_acres: float | None = None
@@ -105,7 +102,7 @@ class BurnInputs:
     roads_access: str = ""
     neighbors: str = ""
     manpower_equipment: str = ""
-    adversely_affected_areas: str = ""
+    nighttime_smoke_screening: str = ""
     breach_potential: str = ""
     smoke_precautions: str = ""
     emergency_resources: str = ""
@@ -199,13 +196,13 @@ def basic_ai_draft(inputs: BurnInputs, weather: WeatherInputs) -> Dict[str, str]
         objective = f"Burn type: {inputs.burn_type}. " + objective
     smoke = inputs.smoke_sensitive_areas or "nearby residences, public roads, utilities, and other smoke-sensitive areas shown on the burn map"
     water = inputs.water_sources or "available water sources and suppression equipment identified before ignition"
-    roads = inputs.roads_access or "primary access roads and interior/exterior firebreaks"
+    roads = inputs.roads_access or "interior and exterior firebreaks"
 
     return {
         "special_features": inputs.special_features or f"Protect all marked utilities, boundary lines, SMZs, roads, structures, wildlife openings, and any sensitive resources shown on the attached map.",
         "objectives": objective,
         "manpower_equipment": inputs.manpower_equipment or f"Minimum crew should be sized for {acres} acres, fuel conditions, and holding needs. Recommended resources include burn manager, ignition personnel, holding crew, UTV/ATV or engine, water tank/pump, hand tools, radios/cell phones, PPE, drip torches, fuel, and mop-up tools.",
-        "adversely_affected_areas": inputs.adversely_affected_areas or f"Potentially affected areas include {smoke}. Confirm wind direction keeps smoke away from these areas before ignition.",
+        "adversely_affected_areas": f"Nighttime smoke screening: {inputs.nighttime_smoke_screening or 'Not specified'}.",
         "breach_potential": inputs.breach_potential or f"Review all downwind lines, corners, heavy fuel pockets, road edges, and changes in topography. Strengthen weak line sections before ignition and assign holding resources to high-risk points.",
         "smoke_precautions": inputs.smoke_precautions or f"Burn only with favorable transport/surface winds, adequate mixing height, and acceptable dispersion. Notify appropriate parties as needed. Monitor smoke across {roads} and stop ignition if smoke impacts become unsafe.",
         "emergency_resources": inputs.emergency_resources or f"Confirm AFC permit, county 911, local fire department, nearest hospital, law enforcement, {water}, and evacuation/access routes before ignition.",
@@ -325,3 +322,144 @@ def nws_point_metadata(latitude: float, longitude: float) -> Dict[str, Any]:
     r = requests.get(url, headers=headers, timeout=20)
     r.raise_for_status()
     return r.json().get("properties", {})
+
+
+
+def export_pdf(inputs: BurnInputs, weather: WeatherInputs, output_path: str | Path, use_ai: bool = False) -> Path:
+    """Create a professional PDF burn plan record from the app inputs."""
+    from reportlab.lib import colors
+    from reportlab.lib.enums import TA_CENTER
+    from reportlab.lib.pagesizes import letter
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib.units import inch
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
+
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    draft = basic_ai_draft(inputs, weather)
+    if use_ai:
+        draft = optional_openai_polish(draft, inputs, weather)
+
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], fontSize=24, leading=30, alignment=TA_CENTER, spaceAfter=18))
+    styles.add(ParagraphStyle(name="SectionHeader", parent=styles["Heading2"], fontSize=14, leading=18, textColor=colors.HexColor("#1f3b2d"), spaceBefore=12, spaceAfter=6))
+    styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=9, leading=12))
+
+    def clean(v: Any) -> str:
+        if v is None:
+            return ""
+        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+
+    def para(text: Any, style="BodyText"):
+        return Paragraph(clean(text), styles[style])
+
+    def section(title: str):
+        return para(title, "SectionHeader")
+
+    def table(rows, widths=None):
+        t = Table([[para(c, "Small") for c in row] for row in rows], colWidths=widths)
+        t.setStyle(TableStyle([
+            ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
+            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8efe9")),
+            ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 6),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
+            ("TOPPADDING", (0, 0), (-1, -1), 5),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+        ]))
+        return t
+
+    def footer(canvas, doc):
+        canvas.saveState()
+        canvas.setFont("Helvetica", 8)
+        burn_id = inputs.tract_name or "Draft Burn Plan"
+        canvas.drawString(0.55 * inch, 0.35 * inch, f"BurnPlan AI - {burn_id}")
+        canvas.drawRightString(7.95 * inch, 0.35 * inch, f"Page {doc.page}")
+        canvas.restoreState()
+
+    doc = SimpleDocTemplate(str(output_path), pagesize=letter, rightMargin=0.55*inch, leftMargin=0.55*inch, topMargin=0.6*inch, bottomMargin=0.6*inch)
+    story = []
+
+    story.append(Spacer(1, 1.0 * inch))
+    story.append(para("Prescribed Burn Plan", "CoverTitle"))
+    story.append(para(inputs.tract_name or "Draft Burn Unit", "Title"))
+    story.append(Spacer(1, 0.2 * inch))
+    story.append(table([
+        ["County", inputs.county],
+        ["State", inputs.state],
+        ["Acres", f"{inputs.burn_acres:g}" if inputs.burn_acres else ""],
+        ["Burn Type", inputs.burn_type],
+        ["Burn Manager", inputs.burn_mgr_name],
+        ["Prepared By", inputs.prepared_by],
+        ["Date Prepared", datetime.now().strftime("%m/%d/%Y")],
+    ], widths=[2.1*inch, 4.7*inch]))
+    story.append(Spacer(1, 0.25 * inch))
+    story.append(para("Draft only. Final review, permitting, site verification, weather verification, smoke screening, and go/no-go decisions remain the responsibility of the qualified burn manager.", "Small"))
+    story.append(PageBreak())
+
+    story.append(section("1. Project Information"))
+    story.append(table([
+        ["Tract / Burn Unit", inputs.tract_name], ["Location", inputs.burn_address], ["County / State", f"{inputs.county}, {inputs.state}"],
+        ["Latitude / Longitude", "" if inputs.latitude is None or inputs.longitude is None else f"{inputs.latitude:.6f}, {inputs.longitude:.6f}"],
+        ["Burn Acres", f"{inputs.burn_acres:g}" if inputs.burn_acres else ""], ["Burn Type", inputs.burn_type],
+    ], widths=[2.0*inch, 4.8*inch]))
+
+    story.append(section("2. Ownership & Contacts"))
+    story.append(table([
+        ["Burn Manager", inputs.burn_mgr_name], ["Certification #", inputs.burn_mgr_cert], ["Phone", inputs.burn_mgr_phone],
+        ["Executor / Landowner Address", inputs.executers_mailing_address], ["Neighbors / Notifications", inputs.neighbors],
+    ], widths=[2.0*inch, 4.8*inch]))
+
+    story.append(section("3. Objectives"))
+    story.append(para(draft.get("objectives", inputs.objectives)))
+    story.append(Spacer(1, 6))
+    story.append(para(f"Special Features to Protect: {draft.get('special_features', inputs.special_features)}"))
+
+    story.append(section("4. Burn Unit Description"))
+    story.append(table([
+        ["Overstory", inputs.overstory_type], ["Understory", inputs.understory_type], ["Fuel Type / Load", inputs.fuel_type_amount],
+        ["Topography", inputs.topography], ["Firebreaks", inputs.roads_access], ["Water Sources / Suppression Resources", inputs.water_sources],
+    ], widths=[2.0*inch, 4.8*inch]))
+
+    story.append(section("5. Weather Prescription"))
+    story.append(table([
+        ["Item", "Desired", "Forecast", "Observed"],
+        ["Surface Wind", inputs.desired_surface_wind, f"{weather.surface_wind_mph or ''} mph {weather.surface_wind_dir}".strip(), inputs.observed_surface_wind],
+        ["RH", inputs.desired_humidity, f"{weather.min_rh or ''}%" if weather.min_rh else "", inputs.observed_humidity],
+        ["Temperature", inputs.desired_temperature, f"{weather.max_temp_f or ''} F" if weather.max_temp_f else "", inputs.observed_temperature],
+        ["Transport Wind", inputs.desired_transport_wind, f"{weather.transport_wind_mph or ''} mph {weather.transport_wind_dir}".strip(), inputs.observed_transport_wind],
+        ["Mixing Height", inputs.desired_mixing_height, f"{weather.mixing_height_ft or ''} ft" if weather.mixing_height_ft else "", inputs.observed_mixing_height],
+        ["Dispersion", inputs.desired_dispersion_index, f"{weather.dispersion_index or ''}" if weather.dispersion_index else "", inputs.observed_dispersion_index],
+        ["KBDI", inputs.desired_kbdi, f"{weather.kbdi or ''}" if weather.kbdi else "", inputs.observed_kbdi],
+    ], widths=[1.35*inch, 1.8*inch, 1.8*inch, 1.85*inch]))
+
+    story.append(section("6. Smoke Management"))
+    story.append(table([
+        ["Smoke Sensitive Areas", inputs.smoke_sensitive_areas],
+        ["Nighttime Smoke Screening", inputs.nighttime_smoke_screening],
+        ["Smoke Precautions", draft.get("smoke_precautions", inputs.smoke_precautions)],
+    ], widths=[2.0*inch, 4.8*inch]))
+
+    story.append(section("7. Personnel & Equipment"))
+    story.append(para(draft.get("manpower_equipment", inputs.manpower_equipment)))
+
+    story.append(section("8. Ignition & Holding Plan"))
+    story.append(para(draft.get("ignition_techniques", inputs.ignition_techniques)))
+    story.append(Spacer(1, 6))
+    story.append(para(f"Breach Potential / Escape Risk: {draft.get('breach_potential', inputs.breach_potential)}"))
+
+    story.append(section("9. Contingency & Safety"))
+    story.append(para(draft.get("emergency_resources", inputs.emergency_resources)))
+
+    story.append(section("10. Final Burn Record"))
+    story.append(table([
+        ["Permit #", inputs.permit_number], ["Actual Burn Date", inputs.actual_burn_date], ["Start Time", inputs.start_time],
+        ["Completion Time", inputs.completion_time], ["Hours to Complete", inputs.hours_to_complete], ["Observed / Expected Flame Length", inputs.flame_length],
+    ], widths=[2.0*inch, 4.8*inch]))
+
+    story.append(section("Rule Check"))
+    story.append(table([["Status", "Item", "Note"]] + build_rule_check(weather), widths=[1.0*inch, 1.6*inch, 4.2*inch]))
+
+    doc.build(story, onFirstPage=footer, onLaterPages=footer)
+    return output_path

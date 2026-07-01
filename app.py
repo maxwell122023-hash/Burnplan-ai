@@ -4,7 +4,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 import streamlit as st
 
-from burnplan_engine import BurnInputs, WeatherInputs, fill_template, build_rule_check, nws_point_metadata
+from burnplan_engine import BurnInputs, WeatherInputs, fill_template, export_pdf, build_rule_check, nws_point_metadata
 
 load_dotenv()
 
@@ -81,9 +81,6 @@ with tabs[0]:
         longitude = st.number_input("Longitude", value=-87.0211, format="%.6f")
         burn_acres = st.number_input("Burn Acres", min_value=0.0, step=1.0)
         burn_type = st.selectbox("Burn Type", BURN_TYPES)
-        section = st.text_input("Section")
-        township = st.text_input("Township")
-        range_ = st.text_input("Range")
 
 with tabs[1]:
     c1, c2 = st.columns(2)
@@ -117,10 +114,6 @@ with tabs[3]:
         topography = st.selectbox("Topography", TOPOGRAPHY_TYPES)
     with c2:
         selected_firebreaks = st.multiselect("Firebreak Types (select all that apply)", FIREBREAK_TYPES)
-        primary_firebreak = st.selectbox("Primary Firebreak", [""] + FIREBREAK_TYPES)
-        firebreak_condition = st.selectbox("Firebreak Condition", ["", "Excellent", "Good", "Fair", "Needs Improvement"])
-        firebreak_notes = st.text_area("Firebreak Notes / Needed Prep", height=90, placeholder="Examples: blow lines before ignition, disk west boundary, improve creek crossing, check dozer line corners.")
-        roads_access_notes = st.text_area("Roads / Access", height=90, placeholder="Primary access, interior roads, weak points, gates, bridges, staging areas, etc.")
         water_sources = st.text_area("Water Sources / Suppression Resources", height=120, placeholder="Ponds, hydrants, tanks, engines, pumps, dozer access, etc.")
 
 with tabs[4]:
@@ -179,7 +172,7 @@ with tabs[4]:
 
 with tabs[5]:
     smoke_sensitive_areas = st.text_area("Smoke Sensitive Areas", height=120, placeholder="Homes, public roads, schools, hospitals, airports, railroads, poultry houses, towns, powerlines, etc.")
-    adversely_affected_areas = st.text_area("Areas That Could Be Adversely Affected", height=120, placeholder="Where smoke, heat, or escape could create issues.")
+    nighttime_smoke_screening = st.selectbox("Nighttime Smoke Screening", ["", "Yes", "No"])
     smoke_precautions = st.text_area("Smoke Precautions / Smoke Management Plan", height=140, placeholder="Describe wind direction, mixing height/dispersion requirements, notification plan, road monitoring, and shutdown triggers.")
 
 with tabs[6]:
@@ -255,14 +248,6 @@ for idx, (status, item, note) in enumerate(build_rule_check(weather)):
 firebreak_summary_parts = []
 if selected_firebreaks:
     firebreak_summary_parts.append("Firebreak types: " + "; ".join(selected_firebreaks))
-if primary_firebreak:
-    firebreak_summary_parts.append("Primary firebreak: " + primary_firebreak)
-if firebreak_condition:
-    firebreak_summary_parts.append("Firebreak condition: " + firebreak_condition)
-if firebreak_notes:
-    firebreak_summary_parts.append("Firebreak prep/notes: " + firebreak_notes)
-if roads_access_notes:
-    firebreak_summary_parts.append("Roads/access: " + roads_access_notes)
 roads_access = "; ".join(firebreak_summary_parts)
 
 inputs = BurnInputs(
@@ -275,9 +260,6 @@ inputs = BurnInputs(
     burn_mgr_phone=burn_mgr_phone,
     executers_mailing_address=executers_mailing_address,
     prepared_by=prepared_by,
-    section=section,
-    township=township,
-    range=range_,
     latitude=latitude,
     longitude=longitude,
     burn_acres=burn_acres,
@@ -293,7 +275,7 @@ inputs = BurnInputs(
     roads_access=roads_access,
     neighbors=neighbors,
     manpower_equipment=manpower_equipment,
-    adversely_affected_areas=adversely_affected_areas,
+    nighttime_smoke_screening=nighttime_smoke_screening,
     breach_potential=breach_potential,
     smoke_precautions=smoke_precautions,
     emergency_resources=emergency_resources,
@@ -322,10 +304,21 @@ inputs = BurnInputs(
     actual_burn_date=actual_burn_date,
 )
 
-if st.button("Generate Excel Burn Plan", type="primary"):
-    safe_name = (tract_name or "draft").replace("/", "-").replace("\\", "-")
-    out = Path("outputs") / f"burn_plan_{safe_name}.xlsx"
-    out = fill_template(inputs, weather, out, use_ai=use_ai)
-    st.success(f"Created {out}")
-    with open(out, "rb") as f:
-        st.download_button("Download Burn Plan Excel", f, file_name=out.name)
+c_excel, c_pdf = st.columns(2)
+with c_excel:
+    if st.button("Generate Excel Burn Plan", type="primary"):
+        safe_name = (tract_name or "draft").replace("/", "-").replace("\\", "-")
+        out = Path("outputs") / f"burn_plan_{safe_name}.xlsx"
+        out = fill_template(inputs, weather, out, use_ai=use_ai)
+        st.success(f"Created {out}")
+        with open(out, "rb") as f:
+            st.download_button("Download Burn Plan Excel", f, file_name=out.name)
+
+with c_pdf:
+    if st.button("Generate PDF Burn Plan"):
+        safe_name = (tract_name or "draft").replace("/", "-").replace("\\", "-")
+        pdf_out = Path("outputs") / f"burn_plan_{safe_name}.pdf"
+        pdf_out = export_pdf(inputs, weather, pdf_out, use_ai=use_ai)
+        st.success(f"Created {pdf_out}")
+        with open(pdf_out, "rb") as f:
+            st.download_button("Download Burn Plan PDF", f, file_name=pdf_out.name, mime="application/pdf")
