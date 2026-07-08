@@ -5,76 +5,32 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 import os
-import re
 import requests
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
 
-
 TEMPLATE_PATH = Path(__file__).with_name("burn_plan_template.xlsx")
 
-# Cell map based on APCO RxBurn Plan Template_(REVISED_6-2-26).xlsx
 CELL_MAP = {
-    "tract_name": "B2",
-    "burn_address": "B3",
-    "state": "B4",
-    "county": "E4",
-    "burn_mgr_name": "B5",
-    "burn_mgr_cert": "G5",
-    "burn_mgr_phone": "B6",
-    "executers_mailing_address": "B7",
-    "prepared_by": "B8",
-    "date_prepared": "G9",
-    "burn_county": "B12",
-    "section": "F12",
-    "township": "H12",
-    "range": "I12",
-    "lat_long": "B13",
-    "burn_acres": "B14",
-    "overstory_type": "B15",
-    "understory_type": "B16",
-    "fuel_type_amount": "B17",
-    "topography": "B18",
-    "special_features": "A20",
-    "objectives": "A22",
-    "manpower_equipment": "A25",
-    "adversely_affected_areas": "A27",
-    "breach_potential": "A29",
-    "smoke_precautions": "A31",
-    "emergency_resources": "A33",
-    "desired_surface_wind": "E35",
-    "forecast_surface_wind": "G35",
-    "observed_surface_wind": "I35",
-    "desired_humidity": "E36",
-    "forecast_humidity": "G36",
-    "observed_humidity": "I36",
-    "desired_temperature": "E37",
-    "forecast_temperature": "G37",
-    "observed_temperature": "I37",
-    "desired_transport_wind": "E38",
-    "forecast_transport_wind": "G38",
-    "observed_transport_wind": "I38",
-    "desired_mixing_height": "E39",
-    "forecast_mixing_height": "G39",
-    "observed_mixing_height": "I39",
-    "desired_dispersion_index": "E40",
-    "forecast_dispersion_index": "G40",
-    "observed_dispersion_index": "I40",
-    "desired_fine_fuel_moisture": "E41",
-    "forecast_fine_fuel_moisture": "G41",
-    "observed_fine_fuel_moisture": "I41",
-    "desired_kbdi": "E42",
-    "forecast_kbdi": "G42",
-    "observed_kbdi": "I42",
-    "start_time": "B44",
-    "completion_time": "E44",
-    "hours_to_complete": "B45",
-    "flame_length": "F45",
-    "ignition_techniques": "B46",
-    "permit_number": "B48",
-    "actual_burn_date": "G48",
+    "tract_name": "B2", "burn_address": "B3", "state": "B4", "county": "E4",
+    "burn_mgr_name": "B5", "burn_mgr_cert": "G5", "burn_mgr_phone": "B6",
+    "executers_mailing_address": "B7", "prepared_by": "B8", "date_prepared": "G9",
+    "burn_county": "B12", "lat_long": "B13", "burn_acres": "B14",
+    "overstory_type": "B15", "understory_type": "B16", "fuel_type_amount": "B17",
+    "topography": "B18", "special_features": "A20", "objectives": "A22",
+    "manpower_equipment": "A25", "adversely_affected_areas": "A27",
+    "breach_potential": "A29", "smoke_precautions": "A31", "emergency_resources": "A33",
+    "desired_surface_wind": "E35", "forecast_surface_wind": "G35", "observed_surface_wind": "I35",
+    "desired_humidity": "E36", "forecast_humidity": "G36", "observed_humidity": "I36",
+    "desired_temperature": "E37", "forecast_temperature": "G37", "observed_temperature": "I37",
+    "desired_transport_wind": "E38", "forecast_transport_wind": "G38", "observed_transport_wind": "I38",
+    "desired_mixing_height": "E39", "forecast_mixing_height": "G39", "observed_mixing_height": "I39",
+    "desired_dispersion_index": "E40", "forecast_dispersion_index": "G40", "observed_dispersion_index": "I40",
+    "desired_fine_fuel_moisture": "E41", "forecast_fine_fuel_moisture": "G41", "observed_fine_fuel_moisture": "I41",
+    "desired_kbdi": "E42", "forecast_kbdi": "G42", "observed_kbdi": "I42",
+    "start_time": "B44", "completion_time": "E44", "hours_to_complete": "B45", "flame_length": "F45",
+    "ignition_techniques": "B46", "permit_number": "B48", "actual_burn_date": "G48",
 }
-
 
 @dataclass
 class BurnInputs:
@@ -103,6 +59,7 @@ class BurnInputs:
     neighbors: str = ""
     manpower_equipment: str = ""
     nighttime_smoke_screening: str = ""
+    special_precautions: str = ""
     breach_potential: str = ""
     smoke_precautions: str = ""
     emergency_resources: str = ""
@@ -129,7 +86,10 @@ class BurnInputs:
     completion_time: str = ""
     permit_number: str = ""
     actual_burn_date: str = ""
-
+    prepared_by_name: str = ""
+    prepared_by_date: str = ""
+    witnessed_by_name: str = ""
+    witnessed_by_date: str = ""
 
 @dataclass
 class WeatherInputs:
@@ -143,9 +103,105 @@ class WeatherInputs:
     dispersion_index: float | None = None
     kbdi: float | None = None
 
+PRESCRIPTION_TEMPLATES: Dict[str, Dict[str, str]] = {
+    "Rangeland": {
+        "season": "Restoration: Jan-Dec; Maintenance: Dec-March",
+        "desired_temperature": "Restoration 45-95°F; Maintenance 45-70°F",
+        "desired_humidity": "Restoration 30-60%; Maintenance 30-50%",
+        "desired_surface_wind": "2-6 mph midflame",
+        "desired_transport_wind": "9 mph +",
+        "desired_mixing_height": "1650 ft +",
+        "desired_dispersion_index": "41-60",
+        "desired_fine_fuel_moisture": "1-hour 6-12%; 10-hour 10-15% or higher",
+        "desired_kbdi": "Restoration <450; Maintenance <300",
+        "ignition_techniques": "Flank, strip-head, head, ring, grid, or ridge; drip torch, powertorch, drone, helicopter, or pyroshot.",
+        "flame_length": "Restoration 2-8 ft; Maintenance 3-12 in",
+        "nighttime_viable": "No",
+        "notes": "Watch for smoldering if mastication was completed first and thatch under green grass.",
+    },
+    "Fuel Reduction": {
+        "season": "Generally dormant season; Nov-April common",
+        "desired_temperature": "50-70°F",
+        "desired_humidity": "30-55%",
+        "desired_surface_wind": "2-6 mph midflame",
+        "desired_transport_wind": "9 mph +",
+        "desired_mixing_height": "1650 ft +",
+        "desired_dispersion_index": "41-60",
+        "desired_fine_fuel_moisture": "1-hour 6-10%; 10-hour 10-15%",
+        "desired_kbdi": "<300",
+        "ignition_techniques": "Flanking, grid, strip-head, or head fire with higher 1-hour fuel moisture/RH; drip torch, powertorch, drone, helicopter, or pyroshot.",
+        "flame_length": "2-4 ft typical for sapling fuel reduction; keep lower where timber scorch risk exists.",
+        "nighttime_viable": "Yes",
+        "notes": "Review whether the unit has been burned in four or more years and manage heavy fuel pockets conservatively.",
+    },
+    "Pre-Marking": {
+        "season": "Nov-April",
+        "desired_temperature": "45-75°F",
+        "desired_humidity": "30-55%",
+        "desired_surface_wind": "<2 mph in overstocked stands",
+        "desired_transport_wind": "9 mph +",
+        "desired_mixing_height": "1650 ft +",
+        "desired_dispersion_index": "41-60",
+        "desired_fine_fuel_moisture": "1-hour 6-12%; 10-hour 15% +",
+        "desired_kbdi": "<300",
+        "ignition_techniques": "Backing, flanking, grid, strip-head, or ridge ignition; drip torch, powertorch, drone, pyroshot, or helicopter.",
+        "flame_length": "1-3 ft",
+        "nighttime_viable": "Yes",
+        "notes": "Confirm landowner tolerance to scorch before ignition.",
+    },
+    "TSI": {
+        "season": "Depends on stand: thinned pine May-Oct; longleaf Jan-Dec; young longleaf Dec-early March; upland mixed hardwood Dec-March",
+        "desired_temperature": "45-100°F depending on stand type",
+        "desired_humidity": "30-65% depending on stand type",
+        "desired_surface_wind": "Use conservative midflame winds suited to stand/fuels",
+        "desired_transport_wind": "9 mph +",
+        "desired_mixing_height": "1650 ft +",
+        "desired_dispersion_index": "41-60",
+        "desired_fine_fuel_moisture": "1-hour 6-14%; 10-hour 12-15% + depending on stand",
+        "desired_kbdi": "<300 to <450 depending on stand and season",
+        "ignition_techniques": "Backing, flanking, grid, strip-head, head, or ridge ignition; drip torch, powertorch, drone, pyroshot, or helicopter.",
+        "flame_length": "<3 ft for thinned pine; 2-4 ft for longleaf; 4-12 in for young longleaf; <2 ft for upland mixed hardwood.",
+        "nighttime_viable": "Depends on objective and stand; yes for some TSI, no for young longleaf/upland hardwood recommendations.",
+        "notes": "Stand-specific review is required. Consider brush density, longleaf bud/candle stage, and hardwood timber quality/scorch tolerance.",
+    },
+    "Site Prep": {
+        "season": "Objective and site dependent",
+        "desired_temperature": "Site/objective dependent",
+        "desired_humidity": "Use prescription approved by burn manager",
+        "desired_surface_wind": "Use prescription approved by burn manager",
+        "desired_transport_wind": "9 mph + preferred",
+        "desired_mixing_height": "1650 ft +",
+        "desired_dispersion_index": "41-60 preferred",
+        "desired_fine_fuel_moisture": "Site/objective dependent",
+        "desired_kbdi": "Site/objective dependent",
+        "ignition_techniques": "Select firing method based on slash, desired intensity, smoke, and holding concerns.",
+        "flame_length": "Site/objective dependent",
+        "nighttime_viable": "Manager review required",
+        "notes": "Site prep prescription should be adjusted for slash loading, soil/site sensitivity, crop-tree concerns, and smoke receptors.",
+    },
+    "Wildlife": {
+        "season": "Objective dependent; dormant or growing season may be appropriate",
+        "desired_temperature": "Objective dependent",
+        "desired_humidity": "30-60% typical planning range",
+        "desired_surface_wind": "2-6 mph midflame commonly used for low-to-moderate intensity burns",
+        "desired_transport_wind": "9 mph + preferred",
+        "desired_mixing_height": "1650 ft +",
+        "desired_dispersion_index": "41-60 preferred",
+        "desired_fine_fuel_moisture": "Objective dependent",
+        "desired_kbdi": "Objective dependent",
+        "ignition_techniques": "Backing, flanking, strip-head, grid, or ring fire depending on desired patchiness and intensity.",
+        "flame_length": "Objective dependent; keep within acceptable scorch and escape-risk limits.",
+        "nighttime_viable": "Manager review required",
+        "notes": "Match season and intensity to target wildlife habitat response, nesting considerations, and fuel conditions.",
+    },
+}
 
-def desired_conditions() -> Dict[str, str]:
-    return {
+def get_prescription_template(burn_type: str) -> Dict[str, str]:
+    return PRESCRIPTION_TEMPLATES.get(burn_type, {})
+
+def desired_conditions(burn_type: str = "") -> Dict[str, str]:
+    t = get_prescription_template(burn_type)
+    defaults = {
         "desired_surface_wind": "5-15 mph, steady direction",
         "desired_humidity": "30-55% typical; avoid extreme low RH",
         "desired_temperature": "Site/objective dependent",
@@ -155,311 +211,145 @@ def desired_conditions() -> Dict[str, str]:
         "desired_fine_fuel_moisture": "Approx. RH / 5",
         "desired_kbdi": "<300 dormant; <450 growing; <550 site prep",
     }
-
-
-def fmt(value: Any) -> str:
-    if value is None:
-        return ""
-    return str(value)
-
+    defaults.update({k: v for k, v in t.items() if k in defaults})
+    return defaults
 
 def build_rule_check(weather: WeatherInputs) -> List[Tuple[str, str, str]]:
-    """Returns rows of (status, item, note)."""
     checks: List[Tuple[str, str, str]] = []
-
     def ok(flag: bool, item: str, good: str, bad: str):
         checks.append(("OK" if flag else "REVIEW", item, good if flag else bad))
-
     if weather.surface_wind_mph is not None:
         ok(5 <= weather.surface_wind_mph <= 15, "Surface wind", "Within 5-15 mph preferred range.", "Outside 5-15 mph preferred range.")
     if weather.min_rh is not None:
-        ok(25 <= weather.min_rh <= 60, "Relative humidity", "Within broad planning range.", "RH may be too low/high for objective; review fuel and escape risk.")
+        ok(25 <= weather.min_rh <= 60, "Relative humidity", "Within broad planning range.", "RH may be too low/high; review objective and fuels.")
     if weather.transport_wind_mph is not None:
-        ok(9 <= weather.transport_wind_mph <= 20, "Transport wind", "Within 9-20 mph preferred range.", "Outside 9-20 mph preferred range.")
+        ok(weather.transport_wind_mph >= 9, "Transport wind", "At least 9 mph.", "Below 9 mph recommendation in prescription references.")
     if weather.mixing_height_ft is not None:
-        ok(weather.mixing_height_ft > 1700, "Mixing height", "Above 1,700 ft.", "Below required 1,700 ft threshold in template.")
+        ok(weather.mixing_height_ft >= 1650, "Mixing height", "At least 1,650 ft.", "Below 1,650 ft recommendation in prescription references.")
     if weather.dispersion_index is not None:
-        ok(weather.dispersion_index > 26 and weather.dispersion_index <= 100, "Dispersion index", "Above 26 and not excessive.", "Must be >26; use caution if >100.")
+        ok(41 <= weather.dispersion_index <= 60, "Dispersion index", "Within 41-60 target range.", "Outside 41-60 target range; review smoke management.")
     if weather.kbdi is not None:
-        ok(weather.kbdi < 450, "KBDI", "Within conservative dormant/growing planning range.", "High KBDI; review season/objective and mop-up needs.")
-
+        ok(weather.kbdi < 450, "KBDI", "Within conservative planning range.", "High KBDI; review season/objective and mop-up needs.")
     if not checks:
         checks.append(("INFO", "Weather", "Enter forecast/observed weather to run checks."))
     return checks
 
-
 def basic_ai_draft(inputs: BurnInputs, weather: WeatherInputs) -> Dict[str, str]:
-    """Deterministic draft text. Safe fallback when no API key is configured."""
-    acres = f"{inputs.burn_acres:g}" if inputs.burn_acres else "the planned"
-    objective = inputs.objectives or "reduce hazardous fuels, improve access/visibility, and support stand and wildlife management objectives"
-    if inputs.burn_type and inputs.burn_type not in objective:
-        objective = f"Burn type: {inputs.burn_type}. " + objective
-    smoke = inputs.smoke_sensitive_areas or "nearby residences, public roads, utilities, and other smoke-sensitive areas shown on the burn map"
-    water = inputs.water_sources or "available water sources and suppression equipment identified before ignition"
-    roads = inputs.roads_access or "interior and exterior firebreaks"
-
+    t = get_prescription_template(inputs.burn_type)
+    objective = inputs.objectives or f"Conduct a prescribed burn for {inputs.burn_type or 'the selected management objective'} while maintaining control, smoke management, and resource protection."
+    if t.get("notes"):
+        objective += f" Prescription note: {t['notes']}"
     return {
-        "special_features": inputs.special_features or f"Protect all marked utilities, boundary lines, SMZs, roads, structures, wildlife openings, and any sensitive resources shown on the attached map.",
+        "special_features": inputs.special_features or "Protect marked utilities, structures, boundary lines, SMZs, gates, cultural resources, wildlife structures, and other sensitive resources identified during pre-burn inspection.",
         "objectives": objective,
-        "manpower_equipment": inputs.manpower_equipment or f"Minimum crew should be sized for {acres} acres, fuel conditions, and holding needs. Recommended resources include burn manager, ignition personnel, holding crew, UTV/ATV or engine, water tank/pump, hand tools, radios/cell phones, PPE, drip torches, fuel, and mop-up tools.",
-        "adversely_affected_areas": f"Nighttime smoke screening: {inputs.nighttime_smoke_screening or 'Not specified'}.",
-        "breach_potential": inputs.breach_potential or f"Review all downwind lines, corners, heavy fuel pockets, road edges, and changes in topography. Strengthen weak line sections before ignition and assign holding resources to high-risk points.",
-        "smoke_precautions": inputs.smoke_precautions or f"Burn only with favorable transport/surface winds, adequate mixing height, and acceptable dispersion. Notify appropriate parties as needed. Monitor smoke across {roads} and stop ignition if smoke impacts become unsafe.",
-        "emergency_resources": inputs.emergency_resources or f"Confirm AFC permit, county 911, local fire department, nearest hospital, law enforcement, {water}, and evacuation/access routes before ignition.",
-        "ignition_techniques": inputs.ignition_techniques or "Use backing fire first along control lines, then flanking/strip-head fire as conditions allow. Adjust firing pattern to maintain desired flame length, smoke lift, and holding safety.",
+        "manpower_equipment": inputs.manpower_equipment or "Crew and equipment shall be sized to acreage, fuel loading, weather, holding needs, and contingency requirements. Minimum resources should include burn boss, ignition and holding personnel, water, communications, PPE, hand tools, and mop-up resources.",
+        "adversely_affected_areas": f"Nighttime smoke screening: {inputs.nighttime_smoke_screening or 'Not specified'}. Special precautions: {inputs.special_precautions or 'None listed'}.",
+        "breach_potential": inputs.breach_potential or "Review downwind lines, corners, heavy fuel pockets, road edges, and changes in topography. Strengthen weak line sections before ignition and assign holding resources to high-risk points.",
+        "smoke_precautions": inputs.smoke_precautions or "Burn only with favorable transport/surface winds, adequate mixing height, and acceptable dispersion. Monitor smoke-sensitive receptors and stop ignition if smoke impacts become unsafe.",
+        "emergency_resources": inputs.emergency_resources or "Confirm permit requirements, 911 access, local fire department, nearest hospital, law enforcement/traffic needs, water sources, and evacuation/access routes before ignition.",
+        "ignition_techniques": inputs.ignition_techniques or t.get("ignition_techniques", "Use backing fire along control lines, then flanking/strip-head fire as conditions allow. Adjust firing pattern to maintain desired flame length, smoke lift, and holding safety."),
     }
 
-
 def optional_openai_polish(draft: Dict[str, str], inputs: BurnInputs, weather: WeatherInputs) -> Dict[str, str]:
-    """Polish text using OpenAI if OPENAI_API_KEY exists. Returns fallback on any error."""
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         return draft
     try:
         from openai import OpenAI
+        import json
         client = OpenAI(api_key=api_key)
-        prompt = {
-            "role": "user",
-            "content": (
-                "Polish these prescribed burn plan draft fields. Keep them concise, conservative, professional, "
-                "and suitable for Certified Burn Manager review. Do not invent permit approval or guarantee safety. "
-                f"Inputs: {asdict(inputs)} Weather: {asdict(weather)} Draft: {draft}. "
-                "Return JSON with the same keys only."
-            ),
-        }
         resp = client.responses.create(
             model="gpt-5.4-mini",
-            input=[prompt],
+            input=[{"role": "user", "content": "Polish these burn plan fields for professional forester review. Keep conservative. Return JSON same keys only. " + str({"inputs": asdict(inputs), "weather": asdict(weather), "draft": draft})}],
             text={"format": {"type": "json_object"}},
         )
-        import json
         polished = json.loads(resp.output_text)
         return {k: str(polished.get(k, v)) for k, v in draft.items()}
     except Exception:
         return draft
 
-
 def fill_template(inputs: BurnInputs, weather: WeatherInputs, output_path: str | Path, use_ai: bool = False) -> Path:
     wb = load_workbook(TEMPLATE_PATH)
     ws = wb.active
-
     data = asdict(inputs)
     data["burn_county"] = inputs.county
     data["lat_long"] = "" if inputs.latitude is None or inputs.longitude is None else f"{inputs.latitude:.6f}, {inputs.longitude:.6f}"
     data["date_prepared"] = datetime.now().strftime("%m/%d/%Y")
-
     draft = basic_ai_draft(inputs, weather)
     if use_ai:
         draft = optional_openai_polish(draft, inputs, weather)
     data.update(draft)
-    for k, v in desired_conditions().items():
-        if not data.get(k):
-            data[k] = v
-
-    if weather.surface_wind_mph is not None:
-        data["forecast_surface_wind"] = f"{weather.surface_wind_mph:g} mph {weather.surface_wind_dir}".strip()
+    for k, v in desired_conditions(inputs.burn_type).items():
+        if not data.get(k): data[k] = v
+    if weather.surface_wind_mph is not None: data["forecast_surface_wind"] = f"{weather.surface_wind_mph:g} mph {weather.surface_wind_dir}".strip()
     if weather.min_rh is not None:
-        data["forecast_humidity"] = f"{weather.min_rh:g}%"
-        data["forecast_fine_fuel_moisture"] = f"~{weather.min_rh/5:.1f}%"
-    if weather.max_temp_f is not None:
-        data["forecast_temperature"] = f"{weather.max_temp_f:g}°F"
-    if weather.transport_wind_mph is not None:
-        data["forecast_transport_wind"] = f"{weather.transport_wind_mph:g} mph {weather.transport_wind_dir}".strip()
-    if weather.mixing_height_ft is not None:
-        data["forecast_mixing_height"] = f"{weather.mixing_height_ft:g} ft"
-    if weather.dispersion_index is not None:
-        data["forecast_dispersion_index"] = f"{weather.dispersion_index:g}"
-    if weather.kbdi is not None:
-        data["forecast_kbdi"] = f"{weather.kbdi:g}"
-
-    if inputs.start_time:
-        data["start_time"] = inputs.start_time
-    if inputs.completion_time:
-        data["completion_time"] = inputs.completion_time
-    if inputs.actual_burn_date:
-        data["actual_burn_date"] = inputs.actual_burn_date
-
+        data["forecast_humidity"] = f"{weather.min_rh:g}%"; data["forecast_fine_fuel_moisture"] = f"~{weather.min_rh/5:.1f}%"
+    if weather.max_temp_f is not None: data["forecast_temperature"] = f"{weather.max_temp_f:g}°F"
+    if weather.transport_wind_mph is not None: data["forecast_transport_wind"] = f"{weather.transport_wind_mph:g} mph {weather.transport_wind_dir}".strip()
+    if weather.mixing_height_ft is not None: data["forecast_mixing_height"] = f"{weather.mixing_height_ft:g} ft"
+    if weather.dispersion_index is not None: data["forecast_dispersion_index"] = f"{weather.dispersion_index:g}"
+    if weather.kbdi is not None: data["forecast_kbdi"] = f"{weather.kbdi:g}"
     def write_cell_safe(cell_ref: str, value: Any) -> None:
-        """Write to the top-left cell when a target cell is inside a merged range."""
         target = ws[cell_ref]
         if isinstance(target, MergedCell):
             for merged_range in ws.merged_cells.ranges:
                 if cell_ref in merged_range:
-                    top_left = ws.cell(row=merged_range.min_row, column=merged_range.min_col)
-                    top_left.value = value
-                    return
+                    ws.cell(row=merged_range.min_row, column=merged_range.min_col).value = value; return
         target.value = value
-
     for key, cell in CELL_MAP.items():
         if key in data and data[key] not in (None, ""):
             write_cell_safe(cell, data[key])
-
-    # Add rule-check sheet for review/audit trail.
-    if "AI Rule Check" in wb.sheetnames:
-        del wb["AI Rule Check"]
+    if "AI Rule Check" in wb.sheetnames: del wb["AI Rule Check"]
     chk = wb.create_sheet("AI Rule Check")
     chk.append(["Status", "Item", "Note"])
-    for row in build_rule_check(weather):
-        chk.append(list(row))
-    chk.append([])
-    chk.append(["Important", "Human review required", "This tool creates a draft only. A qualified/authorized burn manager must verify field conditions, permits, smoke management, and go/no-go decision."])
-    for col in "ABC":
-        chk.column_dimensions[col].width = 26 if col != "C" else 90
-    for row in chk.iter_rows():
-        for cell in row:
-            cell.alignment = cell.alignment.copy(wrap_text=True, vertical="top")
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    wb.save(output_path)
-    return output_path
-
+    for row in build_rule_check(weather): chk.append(list(row))
+    chk.append([]); chk.append(["Important", "Human review required", "Draft only. Qualified burn manager must verify field conditions, permits, smoke management, and go/no-go decision."])
+    output_path = Path(output_path); output_path.parent.mkdir(parents=True, exist_ok=True); wb.save(output_path); return output_path
 
 def nws_point_metadata(latitude: float, longitude: float) -> Dict[str, Any]:
-    """Fetch basic NWS metadata and links. Use in app as a convenience, not a fire-weather replacement."""
-    url = f"https://api.weather.gov/points/{latitude},{longitude}"
-    headers = {"User-Agent": "BurnPlanAI/0.1 contact@example.com"}
-    r = requests.get(url, headers=headers, timeout=20)
-    r.raise_for_status()
-    return r.json().get("properties", {})
-
-
+    r = requests.get(f"https://api.weather.gov/points/{latitude},{longitude}", headers={"User-Agent": "BurnPlanAI/0.1"}, timeout=20)
+    r.raise_for_status(); return r.json().get("properties", {})
 
 def export_pdf(inputs: BurnInputs, weather: WeatherInputs, output_path: str | Path, use_ai: bool = False) -> Path:
-    """Create a professional PDF burn plan record from the app inputs."""
     from reportlab.lib import colors
     from reportlab.lib.enums import TA_CENTER
     from reportlab.lib.pagesizes import letter
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.lib.units import inch
     from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, PageBreak
-
-    output_path = Path(output_path)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-
+    output_path = Path(output_path); output_path.parent.mkdir(parents=True, exist_ok=True)
     draft = basic_ai_draft(inputs, weather)
-    if use_ai:
-        draft = optional_openai_polish(draft, inputs, weather)
-
+    if use_ai: draft = optional_openai_polish(draft, inputs, weather)
     styles = getSampleStyleSheet()
     styles.add(ParagraphStyle(name="CoverTitle", parent=styles["Title"], fontSize=24, leading=30, alignment=TA_CENTER, spaceAfter=18))
     styles.add(ParagraphStyle(name="SectionHeader", parent=styles["Heading2"], fontSize=14, leading=18, textColor=colors.HexColor("#1f3b2d"), spaceBefore=12, spaceAfter=6))
     styles.add(ParagraphStyle(name="Small", parent=styles["BodyText"], fontSize=9, leading=12))
-
     def clean(v: Any) -> str:
-        if v is None:
-            return ""
-        return str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-
-    def para(text: Any, style="BodyText"):
-        return Paragraph(clean(text), styles[style])
-
-    def section(title: str):
-        return para(title, "SectionHeader")
-
+        return "" if v is None else str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    def para(text: Any, style="BodyText"): return Paragraph(clean(text), styles[style])
+    def section(title: str): return para(title, "SectionHeader")
     def table(rows, widths=None):
         t = Table([[para(c, "Small") for c in row] for row in rows], colWidths=widths)
-        t.setStyle(TableStyle([
-            ("GRID", (0, 0), (-1, -1), 0.25, colors.lightgrey),
-            ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e8efe9")),
-            ("VALIGN", (0, 0), (-1, -1), "TOP"),
-            ("LEFTPADDING", (0, 0), (-1, -1), 6),
-            ("RIGHTPADDING", (0, 0), (-1, -1), 6),
-            ("TOPPADDING", (0, 0), (-1, -1), 5),
-            ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
-        ]))
+        t.setStyle(TableStyle([("GRID", (0,0), (-1,-1), 0.25, colors.lightgrey), ("BACKGROUND", (0,0), (-1,0), colors.HexColor("#e8efe9")), ("VALIGN", (0,0), (-1,-1), "TOP"), ("LEFTPADDING", (0,0), (-1,-1), 6), ("RIGHTPADDING", (0,0), (-1,-1), 6), ("TOPPADDING", (0,0), (-1,-1), 5), ("BOTTOMPADDING", (0,0), (-1,-1), 5)]))
         return t
-
     def footer(canvas, doc):
-        canvas.saveState()
-        canvas.setFont("Helvetica", 8)
-        burn_id = inputs.tract_name or "Draft Burn Plan"
-        canvas.drawString(0.55 * inch, 0.35 * inch, f"BurnPlan AI - {burn_id}")
-        canvas.drawRightString(7.95 * inch, 0.35 * inch, f"Page {doc.page}")
-        canvas.restoreState()
-
+        canvas.saveState(); canvas.setFont("Helvetica", 8); canvas.drawString(0.55*inch, 0.35*inch, f"BurnPlan AI - {inputs.tract_name or 'Draft'}"); canvas.drawRightString(7.95*inch, 0.35*inch, f"Page {doc.page}"); canvas.restoreState()
     doc = SimpleDocTemplate(str(output_path), pagesize=letter, rightMargin=0.55*inch, leftMargin=0.55*inch, topMargin=0.6*inch, bottomMargin=0.6*inch)
-    story = []
-
-    story.append(Spacer(1, 1.0 * inch))
-    story.append(para("Prescribed Burn Plan", "CoverTitle"))
-    story.append(para(inputs.tract_name or "Draft Burn Unit", "Title"))
-    story.append(Spacer(1, 0.2 * inch))
-    story.append(table([
-        ["County", inputs.county],
-        ["State", inputs.state],
-        ["Acres", f"{inputs.burn_acres:g}" if inputs.burn_acres else ""],
-        ["Burn Type", inputs.burn_type],
-        ["Burn Manager", inputs.burn_mgr_name],
-        ["Prepared By", inputs.prepared_by],
-        ["Date Prepared", datetime.now().strftime("%m/%d/%Y")],
-    ], widths=[2.1*inch, 4.7*inch]))
-    story.append(Spacer(1, 0.25 * inch))
-    story.append(para("Draft only. Final review, permitting, site verification, weather verification, smoke screening, and go/no-go decisions remain the responsibility of the qualified burn manager.", "Small"))
-    story.append(PageBreak())
-
-    story.append(section("1. Project Information"))
-    story.append(table([
-        ["Tract / Burn Unit", inputs.tract_name], ["Location", inputs.burn_address], ["County / State", f"{inputs.county}, {inputs.state}"],
-        ["Latitude / Longitude", "" if inputs.latitude is None or inputs.longitude is None else f"{inputs.latitude:.6f}, {inputs.longitude:.6f}"],
-        ["Burn Acres", f"{inputs.burn_acres:g}" if inputs.burn_acres else ""], ["Burn Type", inputs.burn_type],
-    ], widths=[2.0*inch, 4.8*inch]))
-
-    story.append(section("2. Ownership & Contacts"))
-    story.append(table([
-        ["Burn Manager", inputs.burn_mgr_name], ["Certification #", inputs.burn_mgr_cert], ["Phone", inputs.burn_mgr_phone],
-        ["Executor / Landowner Address", inputs.executers_mailing_address], ["Neighbors / Notifications", inputs.neighbors],
-    ], widths=[2.0*inch, 4.8*inch]))
-
-    story.append(section("3. Objectives"))
-    story.append(para(draft.get("objectives", inputs.objectives)))
-    story.append(Spacer(1, 6))
-    story.append(para(f"Special Features to Protect: {draft.get('special_features', inputs.special_features)}"))
-
-    story.append(section("4. Burn Unit Description"))
-    story.append(table([
-        ["Overstory", inputs.overstory_type], ["Understory", inputs.understory_type], ["Fuel Type / Load", inputs.fuel_type_amount],
-        ["Topography", inputs.topography], ["Firebreaks", inputs.roads_access], ["Water Sources / Suppression Resources", inputs.water_sources],
-    ], widths=[2.0*inch, 4.8*inch]))
-
-    story.append(section("5. Weather Prescription"))
-    story.append(table([
-        ["Item", "Desired", "Forecast", "Observed"],
-        ["Surface Wind", inputs.desired_surface_wind, f"{weather.surface_wind_mph or ''} mph {weather.surface_wind_dir}".strip(), inputs.observed_surface_wind],
-        ["RH", inputs.desired_humidity, f"{weather.min_rh or ''}%" if weather.min_rh else "", inputs.observed_humidity],
-        ["Temperature", inputs.desired_temperature, f"{weather.max_temp_f or ''} F" if weather.max_temp_f else "", inputs.observed_temperature],
-        ["Transport Wind", inputs.desired_transport_wind, f"{weather.transport_wind_mph or ''} mph {weather.transport_wind_dir}".strip(), inputs.observed_transport_wind],
-        ["Mixing Height", inputs.desired_mixing_height, f"{weather.mixing_height_ft or ''} ft" if weather.mixing_height_ft else "", inputs.observed_mixing_height],
-        ["Dispersion", inputs.desired_dispersion_index, f"{weather.dispersion_index or ''}" if weather.dispersion_index else "", inputs.observed_dispersion_index],
-        ["KBDI", inputs.desired_kbdi, f"{weather.kbdi or ''}" if weather.kbdi else "", inputs.observed_kbdi],
-    ], widths=[1.35*inch, 1.8*inch, 1.8*inch, 1.85*inch]))
-
-    story.append(section("6. Smoke Management"))
-    story.append(table([
-        ["Smoke Sensitive Areas", inputs.smoke_sensitive_areas],
-        ["Nighttime Smoke Screening", inputs.nighttime_smoke_screening],
-        ["Smoke Precautions", draft.get("smoke_precautions", inputs.smoke_precautions)],
-    ], widths=[2.0*inch, 4.8*inch]))
-
-    story.append(section("7. Personnel & Equipment"))
-    story.append(para(draft.get("manpower_equipment", inputs.manpower_equipment)))
-
-    story.append(section("8. Ignition & Holding Plan"))
-    story.append(para(draft.get("ignition_techniques", inputs.ignition_techniques)))
-    story.append(Spacer(1, 6))
-    story.append(para(f"Breach Potential / Escape Risk: {draft.get('breach_potential', inputs.breach_potential)}"))
-
-    story.append(section("9. Contingency & Safety"))
-    story.append(para(draft.get("emergency_resources", inputs.emergency_resources)))
-
-    story.append(section("10. Final Burn Record"))
-    story.append(table([
-        ["Permit #", inputs.permit_number], ["Actual Burn Date", inputs.actual_burn_date], ["Start Time", inputs.start_time],
-        ["Completion Time", inputs.completion_time], ["Hours to Complete", inputs.hours_to_complete], ["Observed / Expected Flame Length", inputs.flame_length],
-    ], widths=[2.0*inch, 4.8*inch]))
-
-    story.append(section("Rule Check"))
-    story.append(table([["Status", "Item", "Note"]] + build_rule_check(weather), widths=[1.0*inch, 1.6*inch, 4.2*inch]))
-
-    doc.build(story, onFirstPage=footer, onLaterPages=footer)
-    return output_path
+    story: List[Any] = []
+    story += [Spacer(1, 0.8*inch), para("Prescribed Burn Plan", "CoverTitle"), para(inputs.tract_name or "Draft Burn Unit", "Title"), Spacer(1, 0.2*inch)]
+    story.append(table([["County", inputs.county], ["State", inputs.state], ["Acres", f"{inputs.burn_acres:g}" if inputs.burn_acres else ""], ["Burn Type", inputs.burn_type], ["Burn Manager", inputs.burn_mgr_name], ["Date Prepared", datetime.now().strftime("%m/%d/%Y")]], widths=[2.1*inch, 4.7*inch]))
+    story += [Spacer(1, 0.25*inch), para("Draft only. Final review, permitting, site verification, weather verification, smoke screening, and go/no-go decisions remain the responsibility of the qualified burn manager.", "Small"), PageBreak()]
+    story.append(section("1. Project Information")); story.append(table([["Tract / Burn Unit", inputs.tract_name], ["Location", inputs.burn_address], ["County / State", f"{inputs.county}, {inputs.state}"], ["Latitude / Longitude", "" if inputs.latitude is None or inputs.longitude is None else f"{inputs.latitude:.6f}, {inputs.longitude:.6f}"], ["Burn Acres", f"{inputs.burn_acres:g}" if inputs.burn_acres else ""], ["Burn Type", inputs.burn_type]], widths=[2*inch, 4.8*inch]))
+    story.append(section("2. Ownership & Contacts")); story.append(table([["Burn Manager", inputs.burn_mgr_name], ["Certification #", inputs.burn_mgr_cert], ["Phone", inputs.burn_mgr_phone], ["Executor / Landowner Address", inputs.executers_mailing_address], ["Neighbors / Notifications", inputs.neighbors]], widths=[2*inch, 4.8*inch]))
+    t = get_prescription_template(inputs.burn_type)
+    story.append(section("3. Prescription Engine Recommendation")); story.append(table([["Item", "Recommendation"], ["Season", t.get("season", "")], ["Temperature", inputs.desired_temperature], ["RH", inputs.desired_humidity], ["Surface Wind", inputs.desired_surface_wind], ["Transport Wind", inputs.desired_transport_wind], ["Mixing Height", inputs.desired_mixing_height], ["Dispersion", inputs.desired_dispersion_index], ["Fine Fuel Moisture", inputs.desired_fine_fuel_moisture], ["KBDI", inputs.desired_kbdi], ["Flame Length", inputs.flame_length or t.get("flame_length", "")], ["Nighttime Viable", t.get("nighttime_viable", "")], ["Notes", t.get("notes", "")]], widths=[2*inch, 4.8*inch]))
+    story.append(section("4. Objectives")); story.append(para(draft.get("objectives", inputs.objectives))); story.append(Spacer(1, 6)); story.append(para(f"Special Features to Protect: {draft.get('special_features', inputs.special_features)}"))
+    story.append(section("5. Burn Unit Description")); story.append(table([["Overstory", inputs.overstory_type], ["Understory", inputs.understory_type], ["Fuel Type / Load", inputs.fuel_type_amount], ["Topography", inputs.topography], ["Firebreaks", inputs.roads_access], ["Water Sources", inputs.water_sources]], widths=[2*inch, 4.8*inch]))
+    story.append(section("6. Weather")); story.append(table([["Item", "Desired", "Forecast", "Observed"], ["Surface Wind", inputs.desired_surface_wind, f"{weather.surface_wind_mph or ''} mph {weather.surface_wind_dir}".strip(), inputs.observed_surface_wind], ["RH", inputs.desired_humidity, f"{weather.min_rh or ''}%" if weather.min_rh else "", inputs.observed_humidity], ["Temperature", inputs.desired_temperature, f"{weather.max_temp_f or ''} F" if weather.max_temp_f else "", inputs.observed_temperature], ["Transport Wind", inputs.desired_transport_wind, f"{weather.transport_wind_mph or ''} mph {weather.transport_wind_dir}".strip(), inputs.observed_transport_wind], ["Mixing Height", inputs.desired_mixing_height, f"{weather.mixing_height_ft or ''} ft" if weather.mixing_height_ft else "", inputs.observed_mixing_height], ["Dispersion", inputs.desired_dispersion_index, f"{weather.dispersion_index or ''}" if weather.dispersion_index else "", inputs.observed_dispersion_index], ["KBDI", inputs.desired_kbdi, f"{weather.kbdi or ''}" if weather.kbdi else "", inputs.observed_kbdi]], widths=[1.35*inch, 1.8*inch, 1.8*inch, 1.85*inch]))
+    story.append(section("7. Smoke & Precautions")); story.append(table([["Smoke Sensitive Areas", inputs.smoke_sensitive_areas], ["Nighttime Smoke Screening", inputs.nighttime_smoke_screening], ["Special Precautions", inputs.special_precautions], ["Smoke Plan", draft.get("smoke_precautions", inputs.smoke_precautions)]], widths=[2*inch, 4.8*inch]))
+    story.append(section("8. Personnel & Equipment")); story.append(para(draft.get("manpower_equipment", inputs.manpower_equipment)))
+    story.append(section("9. Ignition, Holding & Contingency")); story.append(para(draft.get("ignition_techniques", inputs.ignition_techniques))); story.append(Spacer(1, 6)); story.append(para(f"Breach Potential / Escape Risk: {draft.get('breach_potential', inputs.breach_potential)}")); story.append(Spacer(1, 6)); story.append(para(draft.get("emergency_resources", inputs.emergency_resources)))
+    story.append(section("10. Final Burn Record")); story.append(table([["Permit #", inputs.permit_number], ["Actual Burn Date", inputs.actual_burn_date], ["Start Time", inputs.start_time], ["Completion Time", inputs.completion_time], ["Hours to Complete", inputs.hours_to_complete], ["Observed / Expected Flame Length", inputs.flame_length]], widths=[2*inch, 4.8*inch]))
+    story.append(section("11. Plan Approval")); story.append(table([["Prepared By", "Signature", "Date"], [inputs.prepared_by_name, "______________________________", inputs.prepared_by_date], ["Witnessed By", "Signature", "Date"], [inputs.witnessed_by_name, "______________________________", inputs.witnessed_by_date]], widths=[2.2*inch, 2.7*inch, 1.9*inch]))
+    story.append(section("Rule Check")); story.append(table([["Status", "Item", "Note"]] + build_rule_check(weather), widths=[1*inch, 1.6*inch, 4.2*inch]))
+    doc.build(story, onFirstPage=footer, onLaterPages=footer); return output_path

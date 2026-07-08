@@ -1,14 +1,18 @@
-# BurnPlan AI V2.1
+# BurnPlan AI V3 Alpha
 
-Professional prescribed burn plan app built with Streamlit.
+Professional prescribed fire planning app for foresters and burn managers.
 
-## V2.1 edits
-- Removed Section, Township, and Range from the app form.
-- Removed Roads & Access.
-- Removed Firebreak Notes / Needed Prep.
-- Removed Areas That Could Be Adversely Affected from Smoke Management.
-- Added Nighttime Smoke Screening dropdown with Yes/No.
-- Added PDF export alongside Excel export.
+## What's new
+- Prescription Engine recommendations by Burn Type
+- Burn Type templates: Site Prep, Rangeland, TSI, Fuel Reduction, Wildlife, Pre-Marking
+- Apply Prescription Recommendations button
+- Special Precautions checklist
+- Nighttime Smoke Screening Yes/No
+- PDF export with professional report layout
+- Plan Approval signature lines:
+  - Prepared By: Name, Signature, Date
+  - Witnessed By: Name, Signature, Date
+- Excel export retained as optional/editable backup
 
 ## Run locally
 ```bash
@@ -16,5 +20,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-## Streamlit Cloud
-Main file path: `app.py`
+## Deploy on Streamlit
+Set the main file path to:
+
+```text
+app.py
+```
+
+Optional OpenAI polishing can be enabled by adding this to Streamlit Secrets:
+
+```toml
+OPENAI_API_KEY = "your_key_here"
+```
+
+## Important
+This app creates a draft burn plan only. Final review, permitting, field verification, weather verification, smoke screening, and go/no-go decisions remain the responsibility of the qualified burn manager.

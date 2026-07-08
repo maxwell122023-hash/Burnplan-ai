@@ -4,69 +4,57 @@ from pathlib import Path
 from dotenv import load_dotenv
 import streamlit as st
 
-from burnplan_engine import BurnInputs, WeatherInputs, fill_template, export_pdf, build_rule_check, nws_point_metadata
+from burnplan_engine import (
+    BurnInputs, WeatherInputs, fill_template, export_pdf, build_rule_check,
+    nws_point_metadata, get_prescription_template, desired_conditions,
+)
 
 load_dotenv()
 
-ALABAMA_COUNTIES = [
-    "Autauga", "Baldwin", "Barbour", "Bibb", "Blount", "Bullock", "Butler", "Calhoun", "Chambers",
-    "Cherokee", "Chilton", "Choctaw", "Clarke", "Clay", "Cleburne", "Coffee", "Colbert", "Conecuh",
-    "Coosa", "Covington", "Crenshaw", "Cullman", "Dale", "Dallas", "DeKalb", "Elmore", "Escambia",
-    "Etowah", "Fayette", "Franklin", "Geneva", "Greene", "Hale", "Henry", "Houston", "Jackson",
-    "Jefferson", "Lamar", "Lauderdale", "Lawrence", "Lee", "Limestone", "Lowndes", "Macon", "Madison",
-    "Marengo", "Marion", "Marshall", "Mobile", "Monroe", "Montgomery", "Morgan", "Perry", "Pickens",
-    "Pike", "Randolph", "Russell", "Shelby", "St. Clair", "Sumter", "Talladega", "Tallapoosa",
-    "Tuscaloosa", "Walker", "Washington", "Wilcox", "Winston"
-]
-
+ALABAMA_COUNTIES = ["Autauga","Baldwin","Barbour","Bibb","Blount","Bullock","Butler","Calhoun","Chambers","Cherokee","Chilton","Choctaw","Clarke","Clay","Cleburne","Coffee","Colbert","Conecuh","Coosa","Covington","Crenshaw","Cullman","Dale","Dallas","DeKalb","Elmore","Escambia","Etowah","Fayette","Franklin","Geneva","Greene","Hale","Henry","Houston","Jackson","Jefferson","Lamar","Lauderdale","Lawrence","Lee","Limestone","Lowndes","Macon","Madison","Marengo","Marion","Marshall","Mobile","Monroe","Montgomery","Morgan","Perry","Pickens","Pike","Randolph","Russell","Shelby","St. Clair","Sumter","Talladega","Tallapoosa","Tuscaloosa","Walker","Washington","Wilcox","Winston"]
 WIND_DIRECTIONS = ["", "N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable"]
 BURN_TYPES = ["", "Site Prep", "Rangeland", "TSI", "Fuel Reduction", "Wildlife", "Pre-Marking"]
-FIREBREAK_TYPES = ["Blower Line", "Dozer Line", "Hardwood Bottom", "Creek & River", "Handline", "Disced Line"]
+FIREBREAK_TYPES = ["Blower Line", "Dozer Line", "Hardwood Bottom", "Creek", "River", "Handline", "Disced Line"]
 OVERSTORY_TYPES = ["", "Longleaf pine", "Loblolly pine", "Shortleaf pine", "Mixed pine", "Pine-hardwood", "Bottomland hardwood", "Upland hardwood", "Young plantation", "Open field / grassland", "Other"]
 UNDERSTORY_TYPES = ["", "Native warm-season grasses", "Broomsedge / old field", "Pine straw / needle litter", "Hardwood brush", "Sweetgum / red maple regeneration", "Privet / invasive brush", "Gallberry / titi / shrub layer", "Light herbaceous cover", "Heavy rough", "Other"]
 FUEL_TYPES = ["", "Pine litter - light", "Pine litter - moderate", "Pine litter - heavy", "Grass - light", "Grass - moderate", "Grass - heavy", "Old field / broomsedge", "Cutover slash", "Hardwood leaf litter", "Mixed pine-hardwood litter", "Brush / woody understory", "Other"]
 TOPOGRAPHY_TYPES = ["", "Flat", "Gently rolling", "Rolling", "Steep", "Bottomland", "Ridge / slope", "Mixed"]
-BURN_OBJECTIVES = ["Hazardous fuel reduction", "Site preparation", "Hardwood control", "Sweetgum control", "Bradford pear control", "Wildlife habitat improvement", "Native warm-season grass enhancement", "Pine stand management", "Reduce midstory competition", "Improve visibility / access", "Training / demonstration burn", "Other"]
+BURN_OBJECTIVES = ["Hazardous fuel reduction", "Site preparation", "Hardwood control", "Sweetgum control", "Wildlife habitat improvement", "Native warm-season grass enhancement", "Pine stand management", "Reduce midstory competition", "Pre-marking visibility", "Training / demonstration burn", "Other"]
 EQUIPMENT = ["Type 6 engine", "Water tank / slip-on unit", "UTV", "ATV", "Dozer", "Tractor", "Disk", "Backpack blower", "Leaf blower", "Drip torches", "Radios", "Hand tools", "Chainsaw", "PPE", "First aid kit"]
 PERSONNEL_ROLES = ["Burn Boss", "Ignition Boss", "Holding Boss", "Ignition Crew", "Holding Crew", "Engine Operator", "Dozer Operator", "Lookout / Weather", "Traffic Control", "EMS / First Aid"]
-IGNITION_METHODS = ["", "Backing fire", "Flanking fire", "Strip-head fire", "Ring fire", "Spot ignition", "Combination"]
-
+IGNITION_METHODS = ["", "Backing fire", "Flanking fire", "Strip-head fire", "Ring fire", "Spot ignition", "Grid ignition", "Combination"]
+SPECIAL_PRECAUTIONS = ["Shooting houses", "Game cameras", "Orchards", "TES species to protect", "Snags", "Power lines / wooden poles", "Gas lines", "Heavy fuel near line", "Public roads", "Adjacent homes", "Outbuildings", "Gates / access control", "Passive firelines checked", "Neighbor notification", "Firelines inspected", "Buried cable", "Wooden fence posts", "Cemetery", "Bee hives", "Feeders", "Equipment in the woods", "Livestock", "Thatch under green grass"]
 
 def join_selected(items, other_text=""):
     items = [i for i in items if i and i != "Other"]
-    if other_text.strip():
-        items.append(other_text.strip())
+    if other_text.strip(): items.append(other_text.strip())
     return "; ".join(items)
 
+def set_prescription_defaults(burn_type: str):
+    rec = desired_conditions(burn_type)
+    for key, val in rec.items():
+        st.session_state[key] = val
+    t = get_prescription_template(burn_type)
+    if t.get("ignition_techniques"):
+        st.session_state["ignition_sequence"] = t["ignition_techniques"]
+    if t.get("flame_length"):
+        st.session_state["flame_length"] = t["flame_length"]
+    if t.get("nighttime_viable") and not st.session_state.get("nighttime_smoke_screening"):
+        st.session_state["nighttime_smoke_screening"] = "Yes" if t["nighttime_viable"].lower().startswith("yes") else "No" if t["nighttime_viable"].lower().startswith("no") else ""
 
-def text_block(label, placeholder="", height=100):
-    return st.text_area(label, placeholder=placeholder, height=height)
-
-
-st.set_page_config(page_title="BurnPlan AI V2", layout="wide")
-st.title("BurnPlan AI - Professional Forester Edition")
-st.caption("Workflow-based prescribed fire planning software for foresters and burn managers. Draft only — final review by the responsible burn manager required.")
+st.set_page_config(page_title="BurnPlan AI V3 Alpha", layout="wide")
+st.title("BurnPlan AI - Prescription Engine Alpha")
+st.caption("Professional prescribed fire planning for foresters and burn managers. Draft only — final review by the responsible burn manager required.")
 
 with st.sidebar:
     st.header("Controls")
     use_ai = st.toggle("Use OpenAI polishing if API key is set", value=False)
     st.warning("This tool drafts a plan. It does not replace permits, field verification, or go/no-go decisions.")
     st.divider()
-    st.write("Template coverage")
-    st.caption("This layout covers the core professional prescribed-fire workflow: project information, burn unit description, objectives, personnel/equipment, smoke, breach potential, weather, ignition, permit, and final record.")
+    st.write("V3 Alpha")
+    st.caption("Adds prescription recommendations by burn type, special precautions checklist, PDF export, and signature lines.")
 
-tabs = st.tabs([
-    "1 Project Info",
-    "2 Ownership & Contacts",
-    "3 Objectives",
-    "4 Burn Unit",
-    "5 Weather",
-    "6 Smoke",
-    "7 Personnel & Equipment",
-    "8 Ignition & Holding",
-    "9 Contingency & Safety",
-    "10 Final Record",
-])
+tabs = st.tabs(["1 Project Info", "2 Ownership & Contacts", "3 Objectives", "4 Burn Unit", "5 Prescription & Weather", "6 Smoke & Precautions", "7 Personnel & Equipment", "8 Ignition & Holding", "9 Contingency & Safety", "10 Final Record"])
 
 with tabs[0]:
     c1, c2 = st.columns(2)
@@ -80,7 +68,10 @@ with tabs[0]:
         latitude = st.number_input("Latitude", value=32.4074, format="%.6f")
         longitude = st.number_input("Longitude", value=-87.0211, format="%.6f")
         burn_acres = st.number_input("Burn Acres", min_value=0.0, step=1.0)
-        burn_type = st.selectbox("Burn Type", BURN_TYPES)
+        burn_type = st.selectbox("Burn Type", BURN_TYPES, help="Selecting a burn type can load recommended prescription values.")
+        if st.button("Apply Prescription Recommendations", disabled=not bool(burn_type)):
+            set_prescription_defaults(burn_type)
+            st.success(f"Loaded prescription recommendations for {burn_type}.")
 
 with tabs[1]:
     c1, c2 = st.columns(2)
@@ -95,8 +86,8 @@ with tabs[1]:
 with tabs[2]:
     selected_objectives = st.multiselect("Burn Objectives", BURN_OBJECTIVES, default=["Hazardous fuel reduction"])
     objective_other = st.text_input("Other Objective") if "Other" in selected_objectives else ""
-    objectives = st.text_area("Objectives Narrative", value=join_selected(selected_objectives, objective_other), height=140)
-    special_features = st.text_area("Special Features to Protect", height=120, placeholder="SMZs, utilities, structures, boundary lines, cultural resources, wildlife openings, regeneration areas, etc.")
+    objectives = st.text_area("Objectives Narrative", value=join_selected(selected_objectives, objective_other), height=120)
+    special_features = st.text_area("Special Features to Protect", height=100, placeholder="SMZs, utilities, structures, boundary lines, cultural resources, wildlife openings, regeneration areas, etc.")
 
 with tabs[3]:
     c1, c2 = st.columns(2)
@@ -113,24 +104,33 @@ with tabs[3]:
         fuel_type_amount = "; ".join([x for x in [fuel_other or fuel_choice, fuel_load] if x])
         topography = st.selectbox("Topography", TOPOGRAPHY_TYPES)
     with c2:
-        selected_firebreaks = st.multiselect("Firebreak Types (select all that apply)", FIREBREAK_TYPES)
+        selected_firebreaks = st.multiselect("Firebreak Types", FIREBREAK_TYPES)
         water_sources = st.text_area("Water Sources / Suppression Resources", height=120, placeholder="Ponds, hydrants, tanks, engines, pumps, dozer access, etc.")
 
 with tabs[4]:
+    st.subheader("Prescription Engine Recommendation")
+    rec = get_prescription_template(burn_type)
+    if burn_type and rec:
+        st.info("These recommendations are starting points from your objective recommendation reference. Edit them for site-specific conditions.")
+        st.table({"Recommendation": {k.replace("_", " ").title(): v for k, v in rec.items()}})
+    else:
+        st.warning("Select a Burn Type on Project Info, then click Apply Prescription Recommendations.")
+
     st.subheader("Desired Prescription")
     d1, d2, d3, d4 = st.columns(4)
+    defaults = desired_conditions(burn_type)
     with d1:
-        desired_surface_wind = st.text_input("Desired Surface Wind", "5-15 mph, steady direction")
-        desired_humidity = st.text_input("Desired RH", "30-55% typical")
+        desired_surface_wind = st.text_input("Desired Surface Wind", value=st.session_state.get("desired_surface_wind", defaults["desired_surface_wind"]), key="desired_surface_wind")
+        desired_humidity = st.text_input("Desired RH", value=st.session_state.get("desired_humidity", defaults["desired_humidity"]), key="desired_humidity")
     with d2:
-        desired_temperature = st.text_input("Desired Temperature", "Site/objective dependent")
-        desired_transport_wind = st.text_input("Desired Transport Wind", "9-20 mph preferred")
+        desired_temperature = st.text_input("Desired Temperature", value=st.session_state.get("desired_temperature", defaults["desired_temperature"]), key="desired_temperature")
+        desired_transport_wind = st.text_input("Desired Transport Wind", value=st.session_state.get("desired_transport_wind", defaults["desired_transport_wind"]), key="desired_transport_wind")
     with d3:
-        desired_mixing_height = st.text_input("Desired Mixing Height", "> 1700 ft")
-        desired_dispersion_index = st.text_input("Desired Dispersion", "> 26; caution > 100")
+        desired_mixing_height = st.text_input("Desired Mixing Height", value=st.session_state.get("desired_mixing_height", defaults["desired_mixing_height"]), key="desired_mixing_height")
+        desired_dispersion_index = st.text_input("Desired Dispersion", value=st.session_state.get("desired_dispersion_index", defaults["desired_dispersion_index"]), key="desired_dispersion_index")
     with d4:
-        desired_fine_fuel_moisture = st.text_input("Desired Fine Fuel Moisture", "Approx. RH / 5")
-        desired_kbdi = st.text_input("Desired KBDI", "Site/objective dependent")
+        desired_fine_fuel_moisture = st.text_input("Desired Fine Fuel Moisture", value=st.session_state.get("desired_fine_fuel_moisture", defaults["desired_fine_fuel_moisture"]), key="desired_fine_fuel_moisture")
+        desired_kbdi = st.text_input("Desired KBDI", value=st.session_state.get("desired_kbdi", defaults["desired_kbdi"]), key="desired_kbdi")
 
     st.subheader("Forecast Weather")
     w1, w2, w3 = st.columns(3)
@@ -161,7 +161,6 @@ with tabs[4]:
         with o4:
             observed_fine_fuel_moisture = st.text_input("Observed Fine Fuel Moisture")
             observed_kbdi = st.text_input("Observed KBDI")
-
     if st.button("Check NWS point links"):
         try:
             props = nws_point_metadata(latitude, longitude)
@@ -171,22 +170,21 @@ with tabs[4]:
             st.error(f"NWS lookup failed: {e}")
 
 with tabs[5]:
-    smoke_sensitive_areas = st.text_area("Smoke Sensitive Areas", height=120, placeholder="Homes, public roads, schools, hospitals, airports, railroads, poultry houses, towns, powerlines, etc.")
-    nighttime_smoke_screening = st.selectbox("Nighttime Smoke Screening", ["", "Yes", "No"])
-    smoke_precautions = st.text_area("Smoke Precautions / Smoke Management Plan", height=140, placeholder="Describe wind direction, mixing height/dispersion requirements, notification plan, road monitoring, and shutdown triggers.")
+    smoke_sensitive_areas = st.text_area("Smoke Sensitive Areas", height=100, placeholder="Homes, public roads, schools, hospitals, airports, railroads, poultry houses, towns, powerlines, etc.")
+    nighttime_smoke_screening = st.selectbox("Nighttime Smoke Screening", ["", "Yes", "No"], key="nighttime_smoke_screening")
+    selected_precautions = st.multiselect("Special Precautions Checklist", SPECIAL_PRECAUTIONS)
+    extra_precautions = st.text_area("Additional Special Precautions", height=80)
+    special_precautions = join_selected(selected_precautions, extra_precautions)
+    smoke_precautions = st.text_area("Smoke Precautions / Smoke Management Plan", height=120, placeholder="Describe wind direction, mixing height/dispersion requirements, notification plan, road monitoring, and shutdown triggers.")
 
 with tabs[6]:
     st.subheader("Personnel")
     role_values = []
     for role in PERSONNEL_ROLES:
         c1, c2 = st.columns([1, 2])
-        with c1:
-            st.text(role)
-        with c2:
-            name = st.text_input(f"Name for {role}", key=f"role_{role}", label_visibility="collapsed")
-        if name:
-            role_values.append(f"{role}: {name}")
-
+        with c1: st.text(role)
+        with c2: name = st.text_input(f"Name for {role}", key=f"role_{role}", label_visibility="collapsed")
+        if name: role_values.append(f"{role}: {name}")
     st.subheader("Equipment")
     selected_equipment = st.multiselect("Equipment on Site", EQUIPMENT, default=["Water tank / slip-on unit", "UTV", "Drip torches", "Radios", "Hand tools", "PPE"])
     additional_equipment = st.text_area("Additional Equipment / Notes", height=80)
@@ -196,14 +194,14 @@ with tabs[7]:
     c1, c2 = st.columns(2)
     with c1:
         ignition_method = st.selectbox("Primary Ignition Method", IGNITION_METHODS)
-        ignition_sequence = st.text_area("Ignition Sequence", height=120, placeholder="Example: establish blackline on downwind side, secure flanks, then use strip-head fire as conditions allow.")
+        ignition_sequence = st.text_area("Ignition Sequence", height=120, key="ignition_sequence", placeholder="Example: establish blackline on downwind side, secure flanks, then use strip-head fire as conditions allow.")
     with c2:
         holding_plan = st.text_area("Holding Plan", height=120, placeholder="Holding resources, weak points, road crossings, downwind lines, water staging.")
         breach_potential = st.text_area("Breach Potential / Escape Risk", height=120, placeholder="Identify likely escape points and how they will be controlled.")
     ignition_techniques = "; ".join([x for x in [ignition_method, ignition_sequence, holding_plan] if x])
 
 with tabs[8]:
-    emergency_resources = st.text_area("Emergency Resources", height=120, placeholder="AFC permit, 911, fire department, nearest hospital, law enforcement, EMS, water sources, evacuation route.")
+    emergency_resources = st.text_area("Emergency Resources", height=120, placeholder="Permit, 911, fire department, nearest hospital, law enforcement, EMS, water sources, evacuation route.")
     trigger_points = st.text_area("Trigger Points / Stop Work Conditions", height=100, placeholder="Wind shift, RH drop, spotting, smoke on road, line breach, equipment failure, etc.")
     contingency_plan = st.text_area("Contingency / Mop-Up Plan", height=120, placeholder="Reinforcement resources, mop-up standards, patrol plan, recheck schedule.")
     if trigger_points or contingency_plan:
@@ -216,109 +214,65 @@ with tabs[9]:
         completion_time = st.text_input("Completion Time")
     with c2:
         hours_to_complete = st.text_input("Hours to Complete")
-        flame_length = st.text_input("Observed / Expected Flame Length")
+        flame_length = st.text_input("Observed / Expected Flame Length", key="flame_length")
     with c3:
         permit_number = st.text_input("Permit #")
         actual_burn_date = st.text_input("Actual Burn Date")
+    st.subheader("Plan Approval")
+    s1, s2 = st.columns(2)
+    with s1:
+        prepared_by_name = st.text_input("Prepared By - Name")
+        prepared_by_date = st.text_input("Prepared By - Date")
+        st.caption("Signature line will be added to the PDF.")
+    with s2:
+        witnessed_by_name = st.text_input("Witnessed By - Name")
+        witnessed_by_date = st.text_input("Witnessed By - Date")
+        st.caption("Signature line will be added to the PDF.")
 
 weather = WeatherInputs(
-    surface_wind_mph=surface_wind_mph if surface_wind_mph else None,
-    surface_wind_dir=surface_wind_dir,
-    min_rh=min_rh if min_rh else None,
-    max_temp_f=max_temp_f if max_temp_f else None,
-    transport_wind_mph=transport_wind_mph if transport_wind_mph else None,
-    transport_wind_dir=transport_wind_dir,
-    mixing_height_ft=mixing_height_ft if mixing_height_ft else None,
-    dispersion_index=dispersion_index if dispersion_index else None,
-    kbdi=kbdi if kbdi else None,
+    surface_wind_mph=surface_wind_mph if surface_wind_mph else None, surface_wind_dir=surface_wind_dir,
+    min_rh=min_rh if min_rh else None, max_temp_f=max_temp_f if max_temp_f else None,
+    transport_wind_mph=transport_wind_mph if transport_wind_mph else None, transport_wind_dir=transport_wind_dir,
+    mixing_height_ft=mixing_height_ft if mixing_height_ft else None, dispersion_index=dispersion_index if dispersion_index else None, kbdi=kbdi if kbdi else None,
 )
 
-st.divider()
-st.subheader("Rule Check")
+st.divider(); st.subheader("Rule Check")
 cols = st.columns(3)
 for idx, (status, item, note) in enumerate(build_rule_check(weather)):
     with cols[idx % 3]:
-        if status == "OK":
-            st.success(f"{item}: {note}")
-        elif status == "REVIEW":
-            st.error(f"{item}: {note}")
-        else:
-            st.info(f"{item}: {note}")
+        if status == "OK": st.success(f"{item}: {note}")
+        elif status == "REVIEW": st.error(f"{item}: {note}")
+        else: st.info(f"{item}: {note}")
 
-firebreak_summary_parts = []
-if selected_firebreaks:
-    firebreak_summary_parts.append("Firebreak types: " + "; ".join(selected_firebreaks))
-roads_access = "; ".join(firebreak_summary_parts)
-
+roads_access = "Firebreak types: " + "; ".join(selected_firebreaks) if selected_firebreaks else ""
 inputs = BurnInputs(
-    tract_name=tract_name,
-    burn_address=burn_address,
-    state=state,
-    county=county,
-    burn_mgr_name=burn_mgr_name,
-    burn_mgr_cert=burn_mgr_cert,
-    burn_mgr_phone=burn_mgr_phone,
-    executers_mailing_address=executers_mailing_address,
-    prepared_by=prepared_by,
-    latitude=latitude,
-    longitude=longitude,
-    burn_acres=burn_acres,
-    burn_type=burn_type,
-    overstory_type=overstory_type,
-    understory_type=understory_type,
-    fuel_type_amount=fuel_type_amount,
-    topography=topography,
-    special_features=special_features,
-    objectives=objectives,
-    smoke_sensitive_areas=smoke_sensitive_areas,
-    water_sources=water_sources,
-    roads_access=roads_access,
-    neighbors=neighbors,
-    manpower_equipment=manpower_equipment,
-    nighttime_smoke_screening=nighttime_smoke_screening,
-    breach_potential=breach_potential,
-    smoke_precautions=smoke_precautions,
-    emergency_resources=emergency_resources,
-    ignition_techniques=ignition_techniques,
-    desired_surface_wind=desired_surface_wind,
-    desired_humidity=desired_humidity,
-    desired_temperature=desired_temperature,
-    desired_transport_wind=desired_transport_wind,
-    desired_mixing_height=desired_mixing_height,
-    desired_dispersion_index=desired_dispersion_index,
-    desired_fine_fuel_moisture=desired_fine_fuel_moisture,
-    desired_kbdi=desired_kbdi,
-    observed_surface_wind=observed_surface_wind,
-    observed_humidity=observed_humidity,
-    observed_temperature=observed_temperature,
-    observed_transport_wind=observed_transport_wind,
-    observed_mixing_height=observed_mixing_height,
-    observed_dispersion_index=observed_dispersion_index,
-    observed_fine_fuel_moisture=observed_fine_fuel_moisture,
-    observed_kbdi=observed_kbdi,
-    hours_to_complete=hours_to_complete,
-    flame_length=flame_length,
-    start_time=start_time,
-    completion_time=completion_time,
-    permit_number=permit_number,
-    actual_burn_date=actual_burn_date,
+    tract_name=tract_name, burn_address=burn_address, state=state, county=county, burn_mgr_name=burn_mgr_name,
+    burn_mgr_cert=burn_mgr_cert, burn_mgr_phone=burn_mgr_phone, executers_mailing_address=executers_mailing_address,
+    prepared_by=prepared_by, latitude=latitude, longitude=longitude, burn_acres=burn_acres, burn_type=burn_type,
+    overstory_type=overstory_type, understory_type=understory_type, fuel_type_amount=fuel_type_amount, topography=topography,
+    special_features=special_features, objectives=objectives, smoke_sensitive_areas=smoke_sensitive_areas, water_sources=water_sources,
+    roads_access=roads_access, neighbors=neighbors, manpower_equipment=manpower_equipment, nighttime_smoke_screening=nighttime_smoke_screening,
+    special_precautions=special_precautions, breach_potential=breach_potential, smoke_precautions=smoke_precautions, emergency_resources=emergency_resources,
+    ignition_techniques=ignition_techniques, desired_surface_wind=desired_surface_wind, desired_humidity=desired_humidity,
+    desired_temperature=desired_temperature, desired_transport_wind=desired_transport_wind, desired_mixing_height=desired_mixing_height,
+    desired_dispersion_index=desired_dispersion_index, desired_fine_fuel_moisture=desired_fine_fuel_moisture, desired_kbdi=desired_kbdi,
+    observed_surface_wind=observed_surface_wind, observed_humidity=observed_humidity, observed_temperature=observed_temperature,
+    observed_transport_wind=observed_transport_wind, observed_mixing_height=observed_mixing_height, observed_dispersion_index=observed_dispersion_index,
+    observed_fine_fuel_moisture=observed_fine_fuel_moisture, observed_kbdi=observed_kbdi, hours_to_complete=hours_to_complete,
+    flame_length=flame_length, start_time=start_time, completion_time=completion_time, permit_number=permit_number, actual_burn_date=actual_burn_date,
+    prepared_by_name=prepared_by_name, prepared_by_date=prepared_by_date, witnessed_by_name=witnessed_by_name, witnessed_by_date=witnessed_by_date,
 )
 
 c_excel, c_pdf = st.columns(2)
 with c_excel:
     if st.button("Generate Excel Burn Plan", type="primary"):
         safe_name = (tract_name or "draft").replace("/", "-").replace("\\", "-")
-        out = Path("outputs") / f"burn_plan_{safe_name}.xlsx"
-        out = fill_template(inputs, weather, out, use_ai=use_ai)
+        out = fill_template(inputs, weather, Path("outputs") / f"burn_plan_{safe_name}.xlsx", use_ai=use_ai)
         st.success(f"Created {out}")
-        with open(out, "rb") as f:
-            st.download_button("Download Burn Plan Excel", f, file_name=out.name)
-
+        with open(out, "rb") as f: st.download_button("Download Burn Plan Excel", f, file_name=out.name)
 with c_pdf:
     if st.button("Generate PDF Burn Plan"):
         safe_name = (tract_name or "draft").replace("/", "-").replace("\\", "-")
-        pdf_out = Path("outputs") / f"burn_plan_{safe_name}.pdf"
-        pdf_out = export_pdf(inputs, weather, pdf_out, use_ai=use_ai)
+        pdf_out = export_pdf(inputs, weather, Path("outputs") / f"burn_plan_{safe_name}.pdf", use_ai=use_ai)
         st.success(f"Created {pdf_out}")
-        with open(pdf_out, "rb") as f:
-            st.download_button("Download Burn Plan PDF", f, file_name=pdf_out.name, mime="application/pdf")
+        with open(pdf_out, "rb") as f: st.download_button("Download Burn Plan PDF", f, file_name=pdf_out.name, mime="application/pdf")
