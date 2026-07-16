@@ -5,6 +5,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 import os
+import re
 import requests
 from openpyxl import load_workbook
 from openpyxl.cell.cell import MergedCell
@@ -93,6 +94,8 @@ class BurnInputs:
 
 @dataclass
 class WeatherInputs:
+    # NWS county forecast values. These never replace the desired prescription
+    # or observed day-of-burn conditions.
     surface_wind_mph: float | None = None
     surface_wind_dir: str = ""
     min_rh: float | None = None
@@ -102,6 +105,18 @@ class WeatherInputs:
     mixing_height_ft: float | None = None
     dispersion_index: float | None = None
     kbdi: float | None = None
+    forecast_period: str = ""
+    forecast_county: str = ""
+    forecast_office: str = ""
+    forecast_issued: str = ""
+    forecast_product_id: str = ""
+    chance_precip_pct: float | None = None
+    precip_type: str = ""
+    precip_amount: str = ""
+    stability_class: str = ""
+    max_lvori: float | None = None
+    dispersion_category: str = ""
+    remarks: str = ""
 
 PRESCRIPTION_TEMPLATES: Dict[str, Dict[str, str]] = {
     "Rangeland": {
@@ -304,7 +319,177 @@ def fill_template(inputs: BurnInputs, weather: WeatherInputs, output_path: str |
     chk.append(["Status", "Item", "Note"])
     for row in build_rule_check(weather): chk.append(list(row))
     chk.append([]); chk.append(["Important", "Human review required", "Draft only. Qualified burn manager must verify field conditions, permits, smoke management, and go/no-go decision."])
+    if "NWS Forecast Source" in wb.sheetnames:
+        del wb["NWS Forecast Source"]
+    source_ws = wb.create_sheet("NWS Forecast Source")
+    source_ws.append(["Field", "Value"])
+    source_rows = [
+        ("Forecast type", "NWS County Fire Weather Planning Forecast (FWF)"),
+        ("County", weather.forecast_county),
+        ("Forecast period", weather.forecast_period),
+        ("NWS office", weather.forecast_office),
+        ("Issued", weather.forecast_issued),
+        ("NWS product ID", weather.forecast_product_id),
+        ("Chance of precipitation", f"{weather.chance_precip_pct:g}%" if weather.chance_precip_pct is not None else ""),
+        ("Precipitation type", weather.precip_type),
+        ("Precipitation amount", weather.precip_amount),
+        ("Stability class", weather.stability_class),
+        ("Max LVORI", weather.max_lvori if weather.max_lvori is not None else ""),
+        ("Dispersion category", weather.dispersion_category),
+        ("Remarks", weather.remarks),
+        ("Important", "Forecast values are planning information only and do not replace the desired prescription or observed day-of-burn weather."),
+    ]
+    for row in source_rows:
+        source_ws.append(list(row))
+    source_ws.column_dimensions["A"].width = 28
+    source_ws.column_dimensions["B"].width = 85
     output_path = Path(output_path); output_path.parent.mkdir(parents=True, exist_ok=True); wb.save(output_path); return output_path
+
+
+
+def _first_number(value: str) -> float | None:
+    match = re.search(r"-?\d+(?:\.\d+)?", value or "")
+    return float(match.group(0)) if match else None
+
+
+def _parse_wind(value: str) -> Tuple[str, float | None]:
+    raw = (value or "").strip()
+    if not raw:
+        return "", None
+    if "lgt/var" in raw.lower() or "light" in raw.lower():
+        return "Variable", _first_number(raw)
+    direction_match = re.match(r"([A-Za-z]{1,3})", raw)
+    direction = direction_match.group(1).upper() if direction_match else ""
+    return direction, _first_number(raw)
+
+
+def parse_fwf_county_product(product_text: str, county: str) -> Dict[str, Any]:
+    """Parse a county block from an NWS FWF text product.
+
+    FWF is a fixed-width text product. The parser discovers the period-column
+    positions from the heading rather than assuming exact widths.
+    """
+    lines = product_text.replace("\r", "").splitlines()
+    county_re = re.compile(rf"^\s*{re.escape(county)}-\s*$", re.IGNORECASE)
+    start = next((i for i, line in enumerate(lines) if county_re.match(line)), None)
+    if start is None:
+        available = []
+        for i, line in enumerate(lines[:-1]):
+            if re.match(r"^\s*[A-Z]{2}Z\d{3}(?:>\d{3})?-", line) and lines[i + 1].strip().endswith("-"):
+                available.append(lines[i + 1].strip().rstrip("-"))
+        raise ValueError(
+            f"{county} County was not found in this office's FWF product. "
+            f"Counties found include: {', '.join(available[:12]) or 'none detected'}."
+        )
+    end = next((i for i in range(start + 1, len(lines)) if lines[i].strip() == "$$"), len(lines))
+    block = lines[start:end]
+
+    first_row_idx = next((i for i, line in enumerate(block) if re.match(r"^\s*Cloud cover\s{2,}", line)), None)
+    if first_row_idx is None:
+        first_row_idx = next((i for i, line in enumerate(block) if re.match(r"^\s*Temp\s{2,}", line)), None)
+    if first_row_idx is None:
+        raise ValueError(f"The {county} County FWF block did not contain the expected forecast table.")
+    header_idx = first_row_idx - 1
+    while header_idx >= 0 and not block[header_idx].strip():
+        header_idx -= 1
+    header = block[header_idx]
+    matches = list(re.finditer(r"\S(?:.*?\S)?(?=\s{2,}|$)", header))
+    # The table header has no row label, so every detected group is a forecast period.
+    periods = [m.group(0).strip() for m in matches]
+    starts = [m.start() for m in matches]
+    if not periods:
+        raise ValueError("Could not determine forecast periods from the FWF table.")
+
+    parsed: Dict[str, Dict[str, str]] = {p: {} for p in periods}
+    remarks = ""
+    for line in block[header_idx + 1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("Remarks..."):
+            remarks = stripped.split("Remarks...", 1)[1].strip()
+            continue
+        if stripped.startswith("."):
+            break
+        label = line[:starts[0]].strip()
+        if not label:
+            continue
+        for idx, period in enumerate(periods):
+            stop = starts[idx + 1] if idx + 1 < len(starts) else len(line)
+            parsed[period][label] = line[starts[idx]:stop].strip()
+    for period in periods:
+        parsed[period]["Remarks"] = remarks
+    return {"county": county, "periods": periods, "data": parsed}
+
+
+def fetch_county_fwf(county: str, office: str) -> Dict[str, Any]:
+    """Retrieve the newest FWF from the NWS API and parse the selected county."""
+    office = office.upper().strip()
+    headers = {
+        "User-Agent": "BurnPlanAI/0.3 (prescribed fire planning application)",
+        "Accept": "application/geo+json, application/json",
+    }
+    index_url = f"https://api.weather.gov/products/types/FWF/locations/{office}"
+    index_resp = requests.get(index_url, headers=headers, timeout=25)
+    index_resp.raise_for_status()
+    graph = index_resp.json().get("@graph", [])
+    if not graph:
+        raise ValueError(f"No current FWF products were returned for NWS office {office}.")
+    newest = graph[0]
+    product_id = newest.get("id", "").rstrip("/").split("/")[-1]
+    if not product_id:
+        raise ValueError(f"The NWS FWF listing for {office} did not include a product ID.")
+    product_resp = requests.get(f"https://api.weather.gov/products/{product_id}", headers=headers, timeout=25)
+    product_resp.raise_for_status()
+    props = product_resp.json().get("properties", {})
+    product_text = props.get("productText", "")
+    if not product_text:
+        raise ValueError(f"The newest {office} FWF product did not contain product text.")
+    result = parse_fwf_county_product(product_text, county)
+    result.update({
+        "office": office,
+        "issued": props.get("issuanceTime") or newest.get("issuanceTime", ""),
+        "product_id": product_id,
+        "source_url": f"https://api.weather.gov/products/{product_id}",
+    })
+    return result
+
+
+def weather_from_fwf_period(result: Dict[str, Any], period: str) -> Dict[str, Any]:
+    """Convert one parsed FWF period into app-ready forecast fields."""
+    fields = result.get("data", {}).get(period)
+    if not fields:
+        raise ValueError(f"Forecast period {period!r} is not available.")
+    # PM is usually the most relevant daytime 20-ft wind. Fall back to AM.
+    surface_raw = fields.get("20ft wnd mph (PM)") or fields.get("20ft wnd mph (AM)") or ""
+    surface_dir, surface_speed = _parse_wind(surface_raw)
+    transport_dir, transport_speed = _parse_wind(fields.get("Transport wnd (mph)", ""))
+    dispersion_raw = fields.get("Dispersion", "")
+    dispersion_value = _first_number(dispersion_raw)
+    dispersion_category = re.sub(r"^\s*-?\d+(?:\.\d+)?\s*", "", dispersion_raw).strip()
+    return {
+        "surface_wind_mph": surface_speed,
+        "surface_wind_dir": surface_dir,
+        "min_rh": _first_number(fields.get("RH %", "")),
+        "max_temp_f": _first_number(fields.get("Temp", "")),
+        "transport_wind_mph": transport_speed,
+        "transport_wind_dir": transport_dir,
+        "mixing_height_ft": _first_number(fields.get("Mixing hgt (ft-AGL)", "")),
+        "dispersion_index": dispersion_value,
+        "forecast_period": period,
+        "forecast_county": result.get("county", ""),
+        "forecast_office": result.get("office", ""),
+        "forecast_issued": result.get("issued", ""),
+        "forecast_product_id": result.get("product_id", ""),
+        "chance_precip_pct": _first_number(fields.get("Chance precip (%)", "")),
+        "precip_type": fields.get("Precip type", ""),
+        "precip_amount": fields.get("Precip amount", ""),
+        "stability_class": fields.get("Stability class", ""),
+        "max_lvori": _first_number(fields.get("Max LVORI", "")),
+        "dispersion_category": dispersion_category,
+        "remarks": fields.get("Remarks", ""),
+        "raw_fields": fields,
+    }
 
 def nws_point_metadata(latitude: float, longitude: float) -> Dict[str, Any]:
     r = requests.get(f"https://api.weather.gov/points/{latitude},{longitude}", headers={"User-Agent": "BurnPlanAI/0.1"}, timeout=20)
@@ -345,7 +530,7 @@ def export_pdf(inputs: BurnInputs, weather: WeatherInputs, output_path: str | Pa
     story.append(section("3. Prescription Engine Recommendation")); story.append(table([["Item", "Recommendation"], ["Season", t.get("season", "")], ["Temperature", inputs.desired_temperature], ["RH", inputs.desired_humidity], ["Surface Wind", inputs.desired_surface_wind], ["Transport Wind", inputs.desired_transport_wind], ["Mixing Height", inputs.desired_mixing_height], ["Dispersion", inputs.desired_dispersion_index], ["Fine Fuel Moisture", inputs.desired_fine_fuel_moisture], ["KBDI", inputs.desired_kbdi], ["Flame Length", inputs.flame_length or t.get("flame_length", "")], ["Nighttime Viable", t.get("nighttime_viable", "")], ["Notes", t.get("notes", "")]], widths=[2*inch, 4.8*inch]))
     story.append(section("4. Objectives")); story.append(para(draft.get("objectives", inputs.objectives))); story.append(Spacer(1, 6)); story.append(para(f"Special Features to Protect: {draft.get('special_features', inputs.special_features)}"))
     story.append(section("5. Burn Unit Description")); story.append(table([["Overstory", inputs.overstory_type], ["Understory", inputs.understory_type], ["Fuel Type / Load", inputs.fuel_type_amount], ["Topography", inputs.topography], ["Firebreaks", inputs.roads_access], ["Water Sources", inputs.water_sources]], widths=[2*inch, 4.8*inch]))
-    story.append(section("6. Weather")); story.append(table([["Item", "Desired", "Forecast", "Observed"], ["Surface Wind", inputs.desired_surface_wind, f"{weather.surface_wind_mph or ''} mph {weather.surface_wind_dir}".strip(), inputs.observed_surface_wind], ["RH", inputs.desired_humidity, f"{weather.min_rh or ''}%" if weather.min_rh else "", inputs.observed_humidity], ["Temperature", inputs.desired_temperature, f"{weather.max_temp_f or ''} F" if weather.max_temp_f else "", inputs.observed_temperature], ["Transport Wind", inputs.desired_transport_wind, f"{weather.transport_wind_mph or ''} mph {weather.transport_wind_dir}".strip(), inputs.observed_transport_wind], ["Mixing Height", inputs.desired_mixing_height, f"{weather.mixing_height_ft or ''} ft" if weather.mixing_height_ft else "", inputs.observed_mixing_height], ["Dispersion", inputs.desired_dispersion_index, f"{weather.dispersion_index or ''}" if weather.dispersion_index else "", inputs.observed_dispersion_index], ["KBDI", inputs.desired_kbdi, f"{weather.kbdi or ''}" if weather.kbdi else "", inputs.observed_kbdi]], widths=[1.35*inch, 1.8*inch, 1.8*inch, 1.85*inch]))
+    story.append(section("6. Weather")); story.append(para("The desired prescription, NWS county forecast, and observed day-of-burn conditions are separate records. Imported forecast values do not alter the approved prescription.", "Small")); story.append(Spacer(1, 5)); story.append(table([["Item", "Desired Prescription", "NWS County Forecast", "Observed Day-of-Burn"], ["Surface Wind", inputs.desired_surface_wind, f"{weather.surface_wind_mph or ''} mph {weather.surface_wind_dir}".strip(), inputs.observed_surface_wind], ["RH", inputs.desired_humidity, f"{weather.min_rh or ''}%" if weather.min_rh is not None else "", inputs.observed_humidity], ["Temperature", inputs.desired_temperature, f"{weather.max_temp_f or ''} F" if weather.max_temp_f is not None else "", inputs.observed_temperature], ["Transport Wind", inputs.desired_transport_wind, f"{weather.transport_wind_mph or ''} mph {weather.transport_wind_dir}".strip(), inputs.observed_transport_wind], ["Mixing Height", inputs.desired_mixing_height, f"{weather.mixing_height_ft or ''} ft" if weather.mixing_height_ft is not None else "", inputs.observed_mixing_height], ["Dispersion", inputs.desired_dispersion_index, f"{weather.dispersion_index or ''} {weather.dispersion_category}".strip() if weather.dispersion_index is not None else "", inputs.observed_dispersion_index], ["KBDI", inputs.desired_kbdi, f"{weather.kbdi or ''}" if weather.kbdi is not None else "", inputs.observed_kbdi]], widths=[1.25*inch, 1.75*inch, 1.85*inch, 1.95*inch])); story.append(Spacer(1, 5)); story.append(table([["NWS County Forecast Source", "Value"], ["County / Period", f"{weather.forecast_county} - {weather.forecast_period}".strip(" -")], ["Forecast Office", weather.forecast_office], ["Issued", weather.forecast_issued], ["Product ID", weather.forecast_product_id], ["Chance Precipitation", f"{weather.chance_precip_pct:g}%" if weather.chance_precip_pct is not None else ""], ["Precipitation", " ".join(x for x in [weather.precip_type, weather.precip_amount] if x)], ["Stability / LVORI", " / ".join(x for x in [weather.stability_class, f"LVORI {weather.max_lvori:g}" if weather.max_lvori is not None else ""] if x)], ["Remarks", weather.remarks]], widths=[2*inch, 4.8*inch]))
     story.append(section("7. Smoke & Precautions")); story.append(table([["Smoke Sensitive Areas", inputs.smoke_sensitive_areas], ["Nighttime Smoke Screening", inputs.nighttime_smoke_screening], ["Special Precautions", inputs.special_precautions], ["Smoke Plan", draft.get("smoke_precautions", inputs.smoke_precautions)]], widths=[2*inch, 4.8*inch]))
     story.append(section("8. Personnel & Equipment")); story.append(para(draft.get("manpower_equipment", inputs.manpower_equipment)))
     story.append(section("9. Ignition, Holding & Contingency")); story.append(para(draft.get("ignition_techniques", inputs.ignition_techniques))); story.append(Spacer(1, 6)); story.append(para(f"Breach Potential / Escape Risk: {draft.get('breach_potential', inputs.breach_potential)}")); story.append(Spacer(1, 6)); story.append(para(draft.get("emergency_resources", inputs.emergency_resources)))

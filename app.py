@@ -6,15 +6,16 @@ import streamlit as st
 
 from burnplan_engine import (
     BurnInputs, WeatherInputs, fill_template, export_pdf, build_rule_check,
-    nws_point_metadata, get_prescription_template, desired_conditions,
+    nws_point_metadata, fetch_county_fwf, weather_from_fwf_period,
+    get_prescription_template, desired_conditions,
 )
 
 load_dotenv()
 
 ALABAMA_COUNTIES = ["Autauga","Baldwin","Barbour","Bibb","Blount","Bullock","Butler","Calhoun","Chambers","Cherokee","Chilton","Choctaw","Clarke","Clay","Cleburne","Coffee","Colbert","Conecuh","Coosa","Covington","Crenshaw","Cullman","Dale","Dallas","DeKalb","Elmore","Escambia","Etowah","Fayette","Franklin","Geneva","Greene","Hale","Henry","Houston","Jackson","Jefferson","Lamar","Lauderdale","Lawrence","Lee","Limestone","Lowndes","Macon","Madison","Marengo","Marion","Marshall","Mobile","Monroe","Montgomery","Morgan","Perry","Pickens","Pike","Randolph","Russell","Shelby","St. Clair","Sumter","Talladega","Tallapoosa","Tuscaloosa","Walker","Washington","Wilcox","Winston"]
-WIND_DIRECTIONS = ["", "N", "NE", "E", "SE", "S", "SW", "W", "NW", "Variable"]
+WIND_DIRECTIONS = ["", "N", "NNE", "NE", "ENE", "E", "ESE", "SE", "SSE", "S", "SSW", "SW", "WSW", "W", "WNW", "NW", "NNW", "Variable"]
 BURN_TYPES = ["", "Site Prep", "Rangeland", "TSI", "Fuel Reduction", "Wildlife", "Pre-Marking"]
-FIREBREAK_TYPES = ["Blower Line", "Dozer Line", "Hardwood Bottom", "Creek", "River", "Handline", "Disced Line"]
+FIREBREAK_TYPES = ["Blower Line", "Dozer Line", "Hardwood Bottom", "Creek", "River", "Handline", "Disced Line", "Roads"]
 OVERSTORY_TYPES = ["", "Longleaf pine", "Loblolly pine", "Shortleaf pine", "Mixed pine", "Pine-hardwood", "Bottomland hardwood", "Upland hardwood", "Young plantation", "Open field / grassland", "Other"]
 UNDERSTORY_TYPES = ["", "Native warm-season grasses", "Broomsedge / old field", "Pine straw / needle litter", "Hardwood brush", "Sweetgum / red maple regeneration", "Privet / invasive brush", "Gallberry / titi / shrub layer", "Light herbaceous cover", "Heavy rough", "Other"]
 FUEL_TYPES = ["", "Pine litter - light", "Pine litter - moderate", "Pine litter - heavy", "Grass - light", "Grass - moderate", "Grass - heavy", "Old field / broomsedge", "Cutover slash", "Hardwood leaf litter", "Mixed pine-hardwood litter", "Brush / woody understory", "Other"]
@@ -42,8 +43,8 @@ def set_prescription_defaults(burn_type: str):
     if t.get("nighttime_viable") and not st.session_state.get("nighttime_smoke_screening"):
         st.session_state["nighttime_smoke_screening"] = "Yes" if t["nighttime_viable"].lower().startswith("yes") else "No" if t["nighttime_viable"].lower().startswith("no") else ""
 
-st.set_page_config(page_title="BurnPlan AI V3 Alpha", layout="wide")
-st.title("BurnPlan AI - Prescription Engine Alpha")
+st.set_page_config(page_title="BurnPlan AI V3.1", layout="wide")
+st.title("BurnPlan AI - Prescription & County Fire Weather")
 st.caption("Professional prescribed fire planning for foresters and burn managers. Draft only — final review by the responsible burn manager required.")
 
 with st.sidebar:
@@ -51,8 +52,8 @@ with st.sidebar:
     use_ai = st.toggle("Use OpenAI polishing if API key is set", value=False)
     st.warning("This tool drafts a plan. It does not replace permits, field verification, or go/no-go decisions.")
     st.divider()
-    st.write("V3 Alpha")
-    st.caption("Adds prescription recommendations by burn type, special precautions checklist, PDF export, and signature lines.")
+    st.write("V3.1")
+    st.caption("Adds county-based NWS Fire Weather Forecast import while keeping desired, forecast, and observed weather separate.")
 
 tabs = st.tabs(["1 Project Info", "2 Ownership & Contacts", "3 Objectives", "4 Burn Unit", "5 Prescription & Weather", "6 Smoke & Precautions", "7 Personnel & Equipment", "8 Ignition & Holding", "9 Contingency & Safety", "10 Final Record"])
 
@@ -132,20 +133,79 @@ with tabs[4]:
         desired_fine_fuel_moisture = st.text_input("Desired Fine Fuel Moisture", value=st.session_state.get("desired_fine_fuel_moisture", defaults["desired_fine_fuel_moisture"]), key="desired_fine_fuel_moisture")
         desired_kbdi = st.text_input("Desired KBDI", value=st.session_state.get("desired_kbdi", defaults["desired_kbdi"]), key="desired_kbdi")
 
-    st.subheader("Forecast Weather")
+    st.subheader("NWS County Fire Weather Forecast")
+    st.caption("This forecast is kept separate from the desired prescription and observed day-of-burn weather.")
+    f1, f2 = st.columns([2, 1])
+    with f1:
+        office_choice = st.selectbox("NWS Forecast Office", ["Auto from Latitude / Longitude", "BMX", "HUN", "MOB", "TAE"], help="Auto is recommended. The county name is used to select the county block within that office's FWF product.")
+    with f2:
+        retrieve_fwf = st.button("Retrieve County FWF", use_container_width=True)
+    if retrieve_fwf:
+        try:
+            office = office_choice
+            if office_choice.startswith("Auto"):
+                props = nws_point_metadata(latitude, longitude)
+                office = props.get("cwa", "")
+            if not office:
+                raise ValueError("Could not determine the NWS forecast office. Select an office manually.")
+            st.session_state["fwf_result"] = fetch_county_fwf(county, office)
+            st.session_state.pop("fwf_period", None)
+            st.success(f"Retrieved the latest {office} FWF for {county} County.")
+        except Exception as e:
+            st.session_state.pop("fwf_result", None)
+            st.error(f"County FWF retrieval failed: {e}")
+
+    fwf_result = st.session_state.get("fwf_result")
+    if fwf_result and fwf_result.get("county") == county:
+        p1, p2 = st.columns([2, 1])
+        with p1:
+            selected_fwf_period = st.selectbox("Forecast Period to Populate", fwf_result["periods"], key="fwf_period")
+        with p2:
+            apply_fwf = st.button("Populate Forecast Fields", use_container_width=True)
+        if apply_fwf:
+            mapped = weather_from_fwf_period(fwf_result, selected_fwf_period)
+            field_keys = ["surface_wind_mph", "surface_wind_dir", "min_rh", "max_temp_f", "transport_wind_mph", "transport_wind_dir", "mixing_height_ft", "dispersion_index", "forecast_period", "forecast_county", "forecast_office", "forecast_issued", "forecast_product_id", "chance_precip_pct", "precip_type", "precip_amount", "stability_class", "max_lvori", "dispersion_category", "remarks"]
+            for key in field_keys:
+                value = mapped.get(key)
+                if key in {"surface_wind_mph", "min_rh", "max_temp_f", "transport_wind_mph", "mixing_height_ft", "dispersion_index"}:
+                    value = float(value or 0.0)
+                st.session_state[f"forecast_{key}"] = value
+            st.session_state["fwf_raw_fields"] = mapped.get("raw_fields", {})
+            st.success("Forecast fields populated. Desired prescription and observed conditions were not changed.")
+            st.rerun()
+        st.caption(f"Source: NWS {fwf_result.get('office')} | Issued: {fwf_result.get('issued', '')} | Product: {fwf_result.get('product_id', '')}")
+
     w1, w2, w3 = st.columns(3)
     with w1:
-        surface_wind_mph = st.number_input("Forecast Surface Wind MPH", min_value=0.0, step=1.0)
-        surface_wind_dir = st.selectbox("Forecast Surface Wind Direction", WIND_DIRECTIONS, key="surface_wind_dir")
-        min_rh = st.number_input("Forecast Min RH %", min_value=0.0, max_value=100.0, step=1.0)
+        surface_wind_mph = st.number_input("Forecast Surface Wind MPH", min_value=0.0, step=1.0, key="forecast_surface_wind_mph")
+        surface_wind_dir = st.selectbox("Forecast Surface Wind Direction", WIND_DIRECTIONS, key="forecast_surface_wind_dir")
+        min_rh = st.number_input("Forecast Min RH %", min_value=0.0, max_value=100.0, step=1.0, key="forecast_min_rh")
     with w2:
-        max_temp_f = st.number_input("Forecast Max Temp °F", min_value=-20.0, max_value=130.0, step=1.0)
-        transport_wind_mph = st.number_input("Forecast Transport Wind MPH", min_value=0.0, step=1.0)
-        transport_wind_dir = st.selectbox("Forecast Transport Wind Direction", WIND_DIRECTIONS, key="transport_wind_dir")
+        max_temp_f = st.number_input("Forecast Max Temp °F", min_value=-20.0, max_value=130.0, step=1.0, key="forecast_max_temp_f")
+        transport_wind_mph = st.number_input("Forecast Transport Wind MPH", min_value=0.0, step=1.0, key="forecast_transport_wind_mph")
+        transport_wind_dir = st.selectbox("Forecast Transport Wind Direction", WIND_DIRECTIONS, key="forecast_transport_wind_dir")
     with w3:
-        mixing_height_ft = st.number_input("Forecast Mixing Height FT", min_value=0.0, step=100.0)
-        dispersion_index = st.number_input("Forecast Dispersion Index", min_value=0.0, step=1.0)
-        kbdi = st.number_input("Forecast KBDI", min_value=0.0, max_value=800.0, step=10.0)
+        mixing_height_ft = st.number_input("Forecast Mixing Height FT", min_value=0.0, step=100.0, key="forecast_mixing_height_ft")
+        dispersion_index = st.number_input("Forecast Dispersion Index", min_value=0.0, step=1.0, key="forecast_dispersion_index")
+        kbdi = st.number_input("Forecast KBDI (manual if available)", min_value=0.0, max_value=800.0, step=10.0, key="forecast_kbdi")
+
+    if st.session_state.get("forecast_product_id"):
+        with st.expander("Imported NWS County Forecast Details", expanded=False):
+            st.write({
+                "County": st.session_state.get("forecast_forecast_county", county),
+                "Period": st.session_state.get("forecast_forecast_period", ""),
+                "Office": st.session_state.get("forecast_forecast_office", ""),
+                "Issued": st.session_state.get("forecast_forecast_issued", ""),
+                "Chance Precipitation (%)": st.session_state.get("forecast_chance_precip_pct"),
+                "Precipitation Type": st.session_state.get("forecast_precip_type", ""),
+                "Precipitation Amount": st.session_state.get("forecast_precip_amount", ""),
+                "Stability Class": st.session_state.get("forecast_stability_class", ""),
+                "Max LVORI": st.session_state.get("forecast_max_lvori"),
+                "Dispersion Category": st.session_state.get("forecast_dispersion_category", ""),
+                "Remarks": st.session_state.get("forecast_remarks", ""),
+            })
+            if st.session_state.get("fwf_raw_fields"):
+                st.table({"FWF Field": list(st.session_state["fwf_raw_fields"].keys()), "Selected Period Value": list(st.session_state["fwf_raw_fields"].values())})
 
     with st.expander("Observed Weather / Day-of-Burn Values"):
         o1, o2, o3, o4 = st.columns(4)
@@ -234,6 +294,15 @@ weather = WeatherInputs(
     min_rh=min_rh if min_rh else None, max_temp_f=max_temp_f if max_temp_f else None,
     transport_wind_mph=transport_wind_mph if transport_wind_mph else None, transport_wind_dir=transport_wind_dir,
     mixing_height_ft=mixing_height_ft if mixing_height_ft else None, dispersion_index=dispersion_index if dispersion_index else None, kbdi=kbdi if kbdi else None,
+    forecast_period=st.session_state.get("forecast_forecast_period", ""),
+    forecast_county=st.session_state.get("forecast_forecast_county", ""),
+    forecast_office=st.session_state.get("forecast_forecast_office", ""),
+    forecast_issued=st.session_state.get("forecast_forecast_issued", ""),
+    forecast_product_id=st.session_state.get("forecast_forecast_product_id", ""),
+    chance_precip_pct=st.session_state.get("forecast_chance_precip_pct"),
+    precip_type=st.session_state.get("forecast_precip_type", ""), precip_amount=st.session_state.get("forecast_precip_amount", ""),
+    stability_class=st.session_state.get("forecast_stability_class", ""), max_lvori=st.session_state.get("forecast_max_lvori"),
+    dispersion_category=st.session_state.get("forecast_dispersion_category", ""), remarks=st.session_state.get("forecast_remarks", ""),
 )
 
 st.divider(); st.subheader("Rule Check")

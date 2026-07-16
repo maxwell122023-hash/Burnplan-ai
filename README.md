@@ -1,37 +1,23 @@
-# BurnPlan AI V3 Alpha
+# BurnPlan AI V3.1
 
-Professional prescribed fire planning app for foresters and burn managers.
+## New in this version
+- Retrieves the latest NWS Fire Weather Planning Forecast (FWF).
+- Uses the selected county to locate the county forecast block.
+- Automatically determines the NWS office from latitude/longitude, with a manual override.
+- Lets the user select the forecast period before populating forecast fields.
+- Keeps **Desired Prescription**, **NWS County Forecast**, and **Observed Day-of-Burn Conditions** separate.
+- Adds NWS forecast source details to PDF and Excel exports.
+- Adds **Roads** to Firebreak Types.
 
-## What's new
-- Prescription Engine recommendations by Burn Type
-- Burn Type templates: Site Prep, Rangeland, TSI, Fuel Reduction, Wildlife, Pre-Marking
-- Apply Prescription Recommendations button
-- Special Precautions checklist
-- Nighttime Smoke Screening Yes/No
-- PDF export with professional report layout
-- Plan Approval signature lines:
-  - Prepared By: Name, Signature, Date
-  - Witnessed By: Name, Signature, Date
-- Excel export retained as optional/editable backup
+## Deploy
+Upload all files directly to the root of your GitHub repository, replacing the existing files. Commit the changes and reboot the Streamlit app if it does not redeploy automatically. The Streamlit main file remains `app.py`.
 
-## Run locally
-```bash
-pip install -r requirements.txt
-streamlit run app.py
-```
+## Weather workflow
+1. Select county and enter correct latitude/longitude.
+2. Open the Prescription & Weather tab.
+3. Click **Retrieve County FWF**.
+4. Select Today, Tonight, or the available next-day period.
+5. Click **Populate Forecast Fields**.
+6. Review all imported values before using them.
 
-## Deploy on Streamlit
-Set the main file path to:
-
-```text
-app.py
-```
-
-Optional OpenAI polishing can be enabled by adding this to Streamlit Secrets:
-
-```toml
-OPENAI_API_KEY = "your_key_here"
-```
-
-## Important
-This app creates a draft burn plan only. Final review, permitting, field verification, weather verification, smoke screening, and go/no-go decisions remain the responsibility of the qualified burn manager.
+NWS county FWF data is planning information. It does not replace the approved burn prescription, onsite weather observations, permits, smoke screening, or the burn manager's go/no-go decision.
