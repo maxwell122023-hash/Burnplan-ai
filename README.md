@@ -21,3 +21,7 @@ Upload all files directly to the root of your GitHub repository, replacing the e
 6. Review all imported values before using them.
 
 NWS county FWF data is planning information. It does not replace the approved burn prescription, onsite weather observations, permits, smoke screening, or the burn manager's go/no-go decision.
+
+
+## V3.1.1 fix
+Corrected NWS product-detail parsing so FWF product text is read from the current top-level API response while retaining compatibility with nested responses.

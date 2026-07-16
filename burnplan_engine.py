@@ -439,18 +439,41 @@ def fetch_county_fwf(county: str, office: str) -> Dict[str, Any]:
     product_id = newest.get("id", "").rstrip("/").split("/")[-1]
     if not product_id:
         raise ValueError(f"The NWS FWF listing for {office} did not include a product ID.")
-    product_resp = requests.get(f"https://api.weather.gov/products/{product_id}", headers=headers, timeout=25)
+    product_url = f"https://api.weather.gov/products/{product_id}"
+    product_resp = requests.get(product_url, headers=headers, timeout=25)
     product_resp.raise_for_status()
-    props = product_resp.json().get("properties", {})
-    product_text = props.get("productText", "")
+
+    # NWS product detail responses expose productText at the top level.
+    # Some API serializers may also place fields under properties, so support both.
+    payload = product_resp.json()
+    props = payload.get("properties") or {}
+    product_text = (
+        payload.get("productText")
+        or props.get("productText")
+        or payload.get("text")
+        or props.get("text")
+        or ""
+    )
+    if not isinstance(product_text, str):
+        product_text = str(product_text or "")
+    product_text = product_text.strip()
     if not product_text:
-        raise ValueError(f"The newest {office} FWF product did not contain product text.")
+        top_level_fields = ", ".join(sorted(payload.keys()))
+        raise ValueError(
+            f"The newest {office} FWF response did not include readable product text. "
+            f"Returned fields: {top_level_fields or 'none'}."
+        )
+
     result = parse_fwf_county_product(product_text, county)
     result.update({
         "office": office,
-        "issued": props.get("issuanceTime") or newest.get("issuanceTime", ""),
+        "issued": (
+            payload.get("issuanceTime")
+            or props.get("issuanceTime")
+            or newest.get("issuanceTime", "")
+        ),
         "product_id": product_id,
-        "source_url": f"https://api.weather.gov/products/{product_id}",
+        "source_url": product_url,
     })
     return result
 
