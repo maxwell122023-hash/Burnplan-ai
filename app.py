@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 from pathlib import Path
+from dataclasses import asdict
+from datetime import datetime
 from dotenv import load_dotenv
+import json
 import streamlit as st
 
 from burnplan_engine import (
@@ -55,7 +58,7 @@ with st.sidebar:
     st.write("V3.1")
     st.caption("Adds county-based NWS Fire Weather Forecast import while keeping desired, forecast, and observed weather separate.")
 
-tabs = st.tabs(["1 Project Info", "2 Ownership & Contacts", "3 Objectives", "4 Burn Unit", "5 Prescription & Weather", "6 Smoke & Precautions", "7 Personnel & Equipment", "8 Ignition & Holding", "9 Contingency & Safety", "10 Final Record"])
+tabs = st.tabs(["1 Project Info", "2 Ownership & Contacts", "3 Objectives", "4 Burn Unit", "5 Prescription & Weather", "6 Smoke & Precautions", "7 Personnel & Equipment", "8 Ignition & Holding", "9 Contingency & Safety", "10 Final Record", "11 Save / Day-of-Burn"])
 
 with tabs[0]:
     c1, c2 = st.columns(2)
@@ -345,3 +348,116 @@ with c_pdf:
         pdf_out = export_pdf(inputs, weather, Path("outputs") / f"burn_plan_{safe_name}.pdf", use_ai=use_ai)
         st.success(f"Created {pdf_out}")
         with open(pdf_out, "rb") as f: st.download_button("Download Burn Plan PDF", f, file_name=pdf_out.name, mime="application/pdf")
+
+
+with tabs[10]:
+    st.subheader("Save Plan for Later")
+    st.write("Download a BurnPlan record file after preparing the plan. On the day of the burn, return to this tab, upload that file, enter observed weather, and generate an updated final PDF or Excel record.")
+
+    record_payload = {
+        "format": "BurnPlan AI Record",
+        "version": "3.1.2",
+        "saved_at": datetime.now().isoformat(timespec="seconds"),
+        "burn_inputs": asdict(inputs),
+        "forecast_weather": asdict(weather),
+    }
+    record_bytes = json.dumps(record_payload, indent=2).encode("utf-8")
+    record_name = f"burnplan_record_{(tract_name or 'draft').replace('/', '-').replace('\\', '-')}.json"
+    st.download_button(
+        "Download Plan Record for Day-of-Burn Update",
+        data=record_bytes,
+        file_name=record_name,
+        mime="application/json",
+        use_container_width=True,
+    )
+
+    st.divider()
+    st.subheader("Reopen an Existing Plan on Burn Day")
+    uploaded_record = st.file_uploader("Upload a BurnPlan record (.json)", type=["json"], key="day_of_burn_record")
+
+    if uploaded_record is not None:
+        try:
+            saved = json.loads(uploaded_record.getvalue().decode("utf-8"))
+            if saved.get("format") != "BurnPlan AI Record":
+                raise ValueError("This is not a recognized BurnPlan AI record file.")
+
+            saved_inputs_data = saved.get("burn_inputs", {})
+            saved_weather_data = saved.get("forecast_weather", {})
+            saved_inputs = BurnInputs(**{k: v for k, v in saved_inputs_data.items() if k in BurnInputs.__dataclass_fields__})
+            saved_weather = WeatherInputs(**{k: v for k, v in saved_weather_data.items() if k in WeatherInputs.__dataclass_fields__})
+
+            st.success(f"Loaded plan: {saved_inputs.tract_name or 'Unnamed Burn'} — {saved_inputs.county} County")
+            st.caption(f"Saved: {saved.get('saved_at', 'Unknown')} | Burn type: {saved_inputs.burn_type or 'Not entered'} | Acres: {saved_inputs.burn_acres or 0}")
+
+            st.markdown("#### Observed Day-of-Burn Weather")
+            st.caption("These entries update only the observed conditions. The desired prescription and imported NWS county forecast remain unchanged.")
+            u1, u2, u3 = st.columns(3)
+            with u1:
+                update_actual_date = st.text_input("Actual Burn Date", value=saved_inputs.actual_burn_date, key="update_actual_date")
+                update_start_time = st.text_input("Start Time", value=saved_inputs.start_time, key="update_start_time")
+                update_surface_wind = st.text_input("Observed Surface Wind", value=saved_inputs.observed_surface_wind, key="update_surface_wind")
+                update_humidity = st.text_input("Observed RH", value=saved_inputs.observed_humidity, key="update_humidity")
+            with u2:
+                update_temperature = st.text_input("Observed Temperature", value=saved_inputs.observed_temperature, key="update_temperature")
+                update_transport_wind = st.text_input("Observed Transport Wind", value=saved_inputs.observed_transport_wind, key="update_transport_wind")
+                update_mixing_height = st.text_input("Observed Mixing Height", value=saved_inputs.observed_mixing_height, key="update_mixing_height")
+                update_dispersion = st.text_input("Observed Dispersion Index", value=saved_inputs.observed_dispersion_index, key="update_dispersion")
+            with u3:
+                update_fuel_moisture = st.text_input("Observed Fine Fuel Moisture", value=saved_inputs.observed_fine_fuel_moisture, key="update_fuel_moisture")
+                update_kbdi = st.text_input("Observed KBDI", value=saved_inputs.observed_kbdi, key="update_kbdi")
+                update_flame_length = st.text_input("Observed Flame Length", value=saved_inputs.flame_length, key="update_flame_length")
+                update_permit = st.text_input("Permit Number", value=saved_inputs.permit_number, key="update_permit")
+
+            st.markdown("#### Completion Information")
+            q1, q2 = st.columns(2)
+            with q1:
+                update_completion_time = st.text_input("Completion Time", value=saved_inputs.completion_time, key="update_completion_time")
+            with q2:
+                update_hours = st.text_input("Hours to Complete", value=saved_inputs.hours_to_complete, key="update_hours")
+
+            saved_inputs.actual_burn_date = update_actual_date
+            saved_inputs.start_time = update_start_time
+            saved_inputs.completion_time = update_completion_time
+            saved_inputs.hours_to_complete = update_hours
+            saved_inputs.observed_surface_wind = update_surface_wind
+            saved_inputs.observed_humidity = update_humidity
+            saved_inputs.observed_temperature = update_temperature
+            saved_inputs.observed_transport_wind = update_transport_wind
+            saved_inputs.observed_mixing_height = update_mixing_height
+            saved_inputs.observed_dispersion_index = update_dispersion
+            saved_inputs.observed_fine_fuel_moisture = update_fuel_moisture
+            saved_inputs.observed_kbdi = update_kbdi
+            saved_inputs.flame_length = update_flame_length
+            saved_inputs.permit_number = update_permit
+
+            updated_payload = {
+                "format": "BurnPlan AI Record",
+                "version": "3.1.2",
+                "saved_at": datetime.now().isoformat(timespec="seconds"),
+                "burn_inputs": asdict(saved_inputs),
+                "forecast_weather": asdict(saved_weather),
+            }
+            updated_bytes = json.dumps(updated_payload, indent=2).encode("utf-8")
+            safe_loaded_name = (saved_inputs.tract_name or "draft").replace("/", "-").replace("\\", "-")
+
+            st.download_button(
+                "Download Updated BurnPlan Record",
+                data=updated_bytes,
+                file_name=f"burnplan_record_{safe_loaded_name}_updated.json",
+                mime="application/json",
+                use_container_width=True,
+            )
+
+            e1, e2 = st.columns(2)
+            with e1:
+                if st.button("Generate Updated Final PDF", type="primary", use_container_width=True):
+                    pdf_out = export_pdf(saved_inputs, saved_weather, Path("outputs") / f"burn_plan_{safe_loaded_name}_final.pdf", use_ai=use_ai)
+                    with open(pdf_out, "rb") as f:
+                        st.download_button("Download Updated Final PDF", f.read(), file_name=pdf_out.name, mime="application/pdf", use_container_width=True)
+            with e2:
+                if st.button("Generate Updated Excel Record", use_container_width=True):
+                    xlsx_out = fill_template(saved_inputs, saved_weather, Path("outputs") / f"burn_plan_{safe_loaded_name}_final.xlsx", use_ai=use_ai)
+                    with open(xlsx_out, "rb") as f:
+                        st.download_button("Download Updated Excel Record", f.read(), file_name=xlsx_out.name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+        except Exception as exc:
+            st.error(f"Could not open the saved BurnPlan record: {exc}")

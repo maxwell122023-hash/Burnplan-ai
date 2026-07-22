@@ -25,3 +25,15 @@ NWS county FWF data is planning information. It does not replace the approved bu
 
 ## V3.1.1 fix
 Corrected NWS product-detail parsing so FWF product text is read from the current top-level API response while retaining compatibility with nested responses.
+
+## V3.1.2 — Save and reopen on burn day
+
+The app now includes a **Save / Day-of-Burn** tab.
+
+1. Complete the plan and download the BurnPlan `.json` record.
+2. Keep that file with the project records.
+3. On the burn date, reopen the Streamlit app and upload the record in tab 11.
+4. Enter observed weather and completion information.
+5. Generate an updated final PDF, Excel record, and revised BurnPlan record.
+
+The desired prescription and NWS county forecast remain unchanged when day-of-burn observations are added.
