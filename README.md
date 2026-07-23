@@ -45,3 +45,16 @@ The desired prescription and NWS county forecast remain unchanged when day-of-bu
 - Retrieve a newer county FWF inside the uploaded-project editor.
 - Forecast updates do not overwrite desired prescription or observed weather.
 - Export the updated project, PDF, or Excel record.
+
+## V3.1.4 Simple Smoke Screening
+
+The Smoke & Precautions tab now includes:
+
+- A button that opens the Simple Smoke Screening Tool.
+- Completed Yes/No documentation.
+- Screening result selection.
+- Screening notes.
+- Upload of a PDF or image smoke-screen map/screenshot.
+- Persistence of the attachment inside the editable `.burnplan` project.
+- Editing/replacement of the attachment after reopening a project.
+- Smoke-screen documentation in PDF and Excel exports.
