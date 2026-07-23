@@ -1,4 +1,4 @@
-# BurnPlan AI V3.1
+# BurnPlan AI V3.1.3
 
 ## New in this version
 - Retrieves the latest NWS Fire Weather Planning Forecast (FWF).
@@ -23,10 +23,10 @@ Upload all files directly to the root of your GitHub repository, replacing the e
 NWS county FWF data is planning information. It does not replace the approved burn prescription, onsite weather observations, permits, smoke screening, or the burn manager's go/no-go decision.
 
 
-## V3.1.1 fix
+## V3.1.3.1 fix
 Corrected NWS product-detail parsing so FWF product text is read from the current top-level API response while retaining compatibility with nested responses.
 
-## V3.1.2 — Save and reopen on burn day
+## V3.1.3.2 — Save and reopen on burn day
 
 The app now includes a **Save / Day-of-Burn** tab.
 
@@ -37,3 +37,11 @@ The app now includes a **Save / Day-of-Burn** tab.
 5. Generate an updated final PDF, Excel record, and revised BurnPlan record.
 
 The desired prescription and NWS county forecast remain unchanged when day-of-burn observations are added.
+
+## V3.1.3 complete editable project workflow
+
+- Download a complete `.burnplan` project file containing every burn-plan field and the separate county FWF forecast.
+- Upload that project later and edit the entire plan, not only day-of-burn weather.
+- Retrieve a newer county FWF inside the uploaded-project editor.
+- Forecast updates do not overwrite desired prescription or observed weather.
+- Export the updated project, PDF, or Excel record.

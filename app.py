@@ -351,113 +351,302 @@ with c_pdf:
 
 
 with tabs[10]:
-    st.subheader("Save Plan for Later")
-    st.write("Download a BurnPlan record file after preparing the plan. On the day of the burn, return to this tab, upload that file, enter observed weather, and generate an updated final PDF or Excel record.")
+    st.subheader("Open, Edit, and Update a Complete Burn Plan")
+    st.write(
+        "Use the editable BurnPlan project file to reopen the entire plan later. "
+        "After upload, you can change plan details, retrieve a newer county fire-weather forecast, "
+        "enter day-of-burn observations, and generate updated PDF or Excel records."
+    )
 
-    record_payload = {
-        "format": "BurnPlan AI Record",
-        "version": "3.1.2",
+    # The .burnplan file is the complete editable project record. It contains all
+    # plan inputs and the separate NWS county forecast, but not the rendered PDF.
+    complete_payload = {
+        "format": "BurnPlan AI Project",
+        "version": "3.1.3",
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "burn_inputs": asdict(inputs),
         "forecast_weather": asdict(weather),
     }
-    record_bytes = json.dumps(record_payload, indent=2).encode("utf-8")
-    record_name = f"burnplan_record_{(tract_name or 'draft').replace('/', '-').replace('\\', '-')}.json"
+    complete_bytes = json.dumps(complete_payload, indent=2).encode("utf-8")
+    safe_current_name = (tract_name or "draft").replace("/", "-").replace("\\", "-")
     st.download_button(
-        "Download Plan Record for Day-of-Burn Update",
-        data=record_bytes,
-        file_name=record_name,
+        "Download Complete Editable BurnPlan Project",
+        data=complete_bytes,
+        file_name=f"{safe_current_name}.burnplan",
         mime="application/json",
         use_container_width=True,
+        help="Keep this file with the PDF. Upload it later to reopen and edit the complete plan.",
     )
 
     st.divider()
-    st.subheader("Reopen an Existing Plan on Burn Day")
-    uploaded_record = st.file_uploader("Upload a BurnPlan record (.json)", type=["json"], key="day_of_burn_record")
+    uploaded_project = st.file_uploader(
+        "Upload complete BurnPlan project",
+        type=["burnplan", "json"],
+        key="complete_project_upload",
+        help="Upload the .burnplan project file created by this app. Older BurnPlan JSON record files are also accepted.",
+    )
 
-    if uploaded_record is not None:
-        try:
-            saved = json.loads(uploaded_record.getvalue().decode("utf-8"))
-            if saved.get("format") != "BurnPlan AI Record":
-                raise ValueError("This is not a recognized BurnPlan AI record file.")
+    def _load_editor_state(payload: dict) -> None:
+        input_data = payload.get("burn_inputs", {})
+        forecast_data = payload.get("forecast_weather", {})
+        for field_name in BurnInputs.__dataclass_fields__:
+            st.session_state[f"edit_{field_name}"] = input_data.get(field_name, BurnInputs.__dataclass_fields__[field_name].default)
+        for field_name in WeatherInputs.__dataclass_fields__:
+            st.session_state[f"edit_weather_{field_name}"] = forecast_data.get(field_name, WeatherInputs.__dataclass_fields__[field_name].default)
+        st.session_state["editor_project_loaded"] = True
+        st.session_state["editor_source_saved_at"] = payload.get("saved_at", "")
 
-            saved_inputs_data = saved.get("burn_inputs", {})
-            saved_weather_data = saved.get("forecast_weather", {})
-            saved_inputs = BurnInputs(**{k: v for k, v in saved_inputs_data.items() if k in BurnInputs.__dataclass_fields__})
-            saved_weather = WeatherInputs(**{k: v for k, v in saved_weather_data.items() if k in WeatherInputs.__dataclass_fields__})
+    if uploaded_project is not None:
+        upload_signature = f"{uploaded_project.name}:{uploaded_project.size}"
+        if st.session_state.get("loaded_upload_signature") != upload_signature:
+            try:
+                payload = json.loads(uploaded_project.getvalue().decode("utf-8"))
+                recognized = payload.get("format") in {"BurnPlan AI Project", "BurnPlan AI Record"}
+                if not recognized:
+                    raise ValueError("This is not a recognized BurnPlan AI editable project file.")
+                _load_editor_state(payload)
+                st.session_state["loaded_upload_signature"] = upload_signature
+                st.success("Complete burn plan loaded. All fields below are editable.")
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Could not open the BurnPlan project: {exc}")
 
-            st.success(f"Loaded plan: {saved_inputs.tract_name or 'Unnamed Burn'} — {saved_inputs.county} County")
-            st.caption(f"Saved: {saved.get('saved_at', 'Unknown')} | Burn type: {saved_inputs.burn_type or 'Not entered'} | Acres: {saved_inputs.burn_acres or 0}")
+    if st.session_state.get("editor_project_loaded"):
+        st.success(
+            f"Loaded: {st.session_state.get('edit_tract_name') or 'Unnamed Burn'} — "
+            f"{st.session_state.get('edit_county') or 'County not entered'}"
+        )
+        if st.session_state.get("editor_source_saved_at"):
+            st.caption(f"Original project saved: {st.session_state['editor_source_saved_at']}")
 
-            st.markdown("#### Observed Day-of-Burn Weather")
-            st.caption("These entries update only the observed conditions. The desired prescription and imported NWS county forecast remain unchanged.")
-            u1, u2, u3 = st.columns(3)
-            with u1:
-                update_actual_date = st.text_input("Actual Burn Date", value=saved_inputs.actual_burn_date, key="update_actual_date")
-                update_start_time = st.text_input("Start Time", value=saved_inputs.start_time, key="update_start_time")
-                update_surface_wind = st.text_input("Observed Surface Wind", value=saved_inputs.observed_surface_wind, key="update_surface_wind")
-                update_humidity = st.text_input("Observed RH", value=saved_inputs.observed_humidity, key="update_humidity")
-            with u2:
-                update_temperature = st.text_input("Observed Temperature", value=saved_inputs.observed_temperature, key="update_temperature")
-                update_transport_wind = st.text_input("Observed Transport Wind", value=saved_inputs.observed_transport_wind, key="update_transport_wind")
-                update_mixing_height = st.text_input("Observed Mixing Height", value=saved_inputs.observed_mixing_height, key="update_mixing_height")
-                update_dispersion = st.text_input("Observed Dispersion Index", value=saved_inputs.observed_dispersion_index, key="update_dispersion")
-            with u3:
-                update_fuel_moisture = st.text_input("Observed Fine Fuel Moisture", value=saved_inputs.observed_fine_fuel_moisture, key="update_fuel_moisture")
-                update_kbdi = st.text_input("Observed KBDI", value=saved_inputs.observed_kbdi, key="update_kbdi")
-                update_flame_length = st.text_input("Observed Flame Length", value=saved_inputs.flame_length, key="update_flame_length")
-                update_permit = st.text_input("Permit Number", value=saved_inputs.permit_number, key="update_permit")
+        edit_tabs = st.tabs([
+            "Project", "Unit & Objectives", "Prescription", "County Forecast",
+            "Smoke & Resources", "Ignition & Safety", "Burn-Day Record", "Export"
+        ])
 
-            st.markdown("#### Completion Information")
-            q1, q2 = st.columns(2)
-            with q1:
-                update_completion_time = st.text_input("Completion Time", value=saved_inputs.completion_time, key="update_completion_time")
-            with q2:
-                update_hours = st.text_input("Hours to Complete", value=saved_inputs.hours_to_complete, key="update_hours")
+        with edit_tabs[0]:
+            a, b = st.columns(2)
+            with a:
+                st.text_input("Tract / Burn Unit Name", key="edit_tract_name")
+                st.text_input("Burn Address / Property Location", key="edit_burn_address")
+                current_county = st.session_state.get("edit_county", "")
+                county_index = ALABAMA_COUNTIES.index(current_county) if current_county in ALABAMA_COUNTIES else 0
+                st.selectbox("County", ALABAMA_COUNTIES, index=county_index, key="edit_county")
+                st.selectbox("State", ["AL"], key="edit_state")
+                st.text_input("Plan Prepared By", key="edit_prepared_by")
+                current_type = st.session_state.get("edit_burn_type", "")
+                type_index = BURN_TYPES.index(current_type) if current_type in BURN_TYPES else 0
+                st.selectbox("Burn Type", BURN_TYPES, index=type_index, key="edit_burn_type")
+            with b:
+                st.number_input("Latitude", format="%.6f", key="edit_latitude")
+                st.number_input("Longitude", format="%.6f", key="edit_longitude")
+                st.number_input("Burn Acres", min_value=0.0, step=1.0, key="edit_burn_acres")
+                st.text_input("Burn Manager Name", key="edit_burn_mgr_name")
+                st.text_input("Burn Manager Certification #", key="edit_burn_mgr_cert")
+                st.text_input("Burn Manager Phone", key="edit_burn_mgr_phone")
+                st.text_area("Executor / Landowner Mailing Address", key="edit_executers_mailing_address")
 
-            saved_inputs.actual_burn_date = update_actual_date
-            saved_inputs.start_time = update_start_time
-            saved_inputs.completion_time = update_completion_time
-            saved_inputs.hours_to_complete = update_hours
-            saved_inputs.observed_surface_wind = update_surface_wind
-            saved_inputs.observed_humidity = update_humidity
-            saved_inputs.observed_temperature = update_temperature
-            saved_inputs.observed_transport_wind = update_transport_wind
-            saved_inputs.observed_mixing_height = update_mixing_height
-            saved_inputs.observed_dispersion_index = update_dispersion
-            saved_inputs.observed_fine_fuel_moisture = update_fuel_moisture
-            saved_inputs.observed_kbdi = update_kbdi
-            saved_inputs.flame_length = update_flame_length
-            saved_inputs.permit_number = update_permit
+        with edit_tabs[1]:
+            a, b = st.columns(2)
+            with a:
+                st.text_area("Objectives", key="edit_objectives", height=100)
+                st.text_area("Special Features to Protect", key="edit_special_features", height=100)
+                st.text_input("Overstory Type", key="edit_overstory_type")
+                st.text_input("Understory Type", key="edit_understory_type")
+                st.text_input("Fuel Type / Amount", key="edit_fuel_type_amount")
+                st.text_input("Topography", key="edit_topography")
+            with b:
+                current_breaks = [x.strip() for x in str(st.session_state.get("edit_roads_access", "")).split(";") if x.strip()]
+                selected_breaks = st.multiselect(
+                    "Firebreak Types",
+                    FIREBREAK_TYPES,
+                    default=[x for x in current_breaks if x in FIREBREAK_TYPES],
+                    key="edit_firebreak_selector",
+                )
+                # Store firebreaks in the existing compatibility field.
+                st.session_state["edit_roads_access"] = "; ".join(selected_breaks)
+                st.text_area("Water Sources / Suppression Resources", key="edit_water_sources", height=100)
+                st.text_area("Neighbors / Notifications", key="edit_neighbors", height=100)
+                st.text_area("Personnel and Equipment", key="edit_manpower_equipment", height=130)
 
-            updated_payload = {
-                "format": "BurnPlan AI Record",
-                "version": "3.1.2",
-                "saved_at": datetime.now().isoformat(timespec="seconds"),
-                "burn_inputs": asdict(saved_inputs),
-                "forecast_weather": asdict(saved_weather),
+        with edit_tabs[2]:
+            st.caption("The desired prescription remains separate from both forecast and observed weather.")
+            a, b = st.columns(2)
+            with a:
+                st.text_input("Desired Surface Wind", key="edit_desired_surface_wind")
+                st.text_input("Desired Relative Humidity", key="edit_desired_humidity")
+                st.text_input("Desired Temperature", key="edit_desired_temperature")
+                st.text_input("Desired Transport Wind", key="edit_desired_transport_wind")
+            with b:
+                st.text_input("Desired Mixing Height", key="edit_desired_mixing_height")
+                st.text_input("Desired Dispersion Index", key="edit_desired_dispersion_index")
+                st.text_input("Desired Fine Fuel Moisture", key="edit_desired_fine_fuel_moisture")
+                st.text_input("Desired KBDI", key="edit_desired_kbdi")
+
+        with edit_tabs[3]:
+            st.caption("Retrieve a new NWS county FWF without changing the desired prescription or observed burn weather.")
+            a, b = st.columns([2, 1])
+            with a:
+                editor_office = st.selectbox(
+                    "NWS Forecast Office",
+                    ["Auto from Latitude / Longitude", "BMX", "HUN", "MOB", "TAE"],
+                    key="editor_office_choice",
+                )
+            with b:
+                editor_retrieve = st.button("Retrieve New County FWF", use_container_width=True, key="editor_retrieve_fwf")
+
+            if editor_retrieve:
+                try:
+                    office = editor_office
+                    if editor_office.startswith("Auto"):
+                        props = nws_point_metadata(float(st.session_state["edit_latitude"]), float(st.session_state["edit_longitude"]))
+                        office = props.get("cwa", "")
+                    if not office:
+                        raise ValueError("Could not determine the NWS forecast office. Select an office manually.")
+                    result = fetch_county_fwf(st.session_state["edit_county"], office)
+                    st.session_state["editor_fwf_result"] = result
+                    st.success(f"Retrieved latest {office} FWF for {st.session_state['edit_county']} County.")
+                except Exception as exc:
+                    st.session_state.pop("editor_fwf_result", None)
+                    st.error(f"County FWF retrieval failed: {exc}")
+
+            editor_fwf = st.session_state.get("editor_fwf_result")
+            if editor_fwf and editor_fwf.get("county") == st.session_state.get("edit_county"):
+                a, b = st.columns([2, 1])
+                with a:
+                    editor_period = st.selectbox("Forecast Period", editor_fwf["periods"], key="editor_fwf_period")
+                with b:
+                    if st.button("Populate Uploaded Plan Forecast", use_container_width=True, key="editor_apply_fwf"):
+                        mapped = weather_from_fwf_period(editor_fwf, editor_period)
+                        for field_name in WeatherInputs.__dataclass_fields__:
+                            if field_name in mapped:
+                                st.session_state[f"edit_weather_{field_name}"] = mapped[field_name]
+                        st.success("County forecast updated. Desired and observed weather were not changed.")
+                        st.rerun()
+
+            a, b, c = st.columns(3)
+            with a:
+                st.number_input("Forecast Surface Wind MPH", min_value=0.0, step=1.0, key="edit_weather_surface_wind_mph")
+                current_dir = st.session_state.get("edit_weather_surface_wind_dir", "")
+                dir_index = WIND_DIRECTIONS.index(current_dir) if current_dir in WIND_DIRECTIONS else 0
+                st.selectbox("Forecast Surface Wind Direction", WIND_DIRECTIONS, index=dir_index, key="edit_weather_surface_wind_dir")
+                st.number_input("Forecast Minimum RH %", min_value=0.0, max_value=100.0, step=1.0, key="edit_weather_min_rh")
+                st.number_input("Forecast Maximum Temperature °F", step=1.0, key="edit_weather_max_temp_f")
+            with b:
+                st.number_input("Forecast Transport Wind MPH", min_value=0.0, step=1.0, key="edit_weather_transport_wind_mph")
+                current_tdir = st.session_state.get("edit_weather_transport_wind_dir", "")
+                tdir_index = WIND_DIRECTIONS.index(current_tdir) if current_tdir in WIND_DIRECTIONS else 0
+                st.selectbox("Forecast Transport Wind Direction", WIND_DIRECTIONS, index=tdir_index, key="edit_weather_transport_wind_dir")
+                st.number_input("Forecast Mixing Height FT", min_value=0.0, step=100.0, key="edit_weather_mixing_height_ft")
+                st.number_input("Forecast Dispersion Index", min_value=0.0, step=1.0, key="edit_weather_dispersion_index")
+            with c:
+                st.text_input("Forecast Period", key="edit_weather_forecast_period")
+                st.text_input("Forecast Office", key="edit_weather_forecast_office")
+                st.text_input("Forecast Issued", key="edit_weather_forecast_issued")
+                st.text_input("Forecast Product ID", key="edit_weather_forecast_product_id")
+                st.number_input("Forecast KBDI", min_value=0.0, max_value=800.0, step=10.0, key="edit_weather_kbdi")
+
+            with st.expander("Additional County Forecast Details"):
+                st.number_input("Chance of Precipitation %", min_value=0.0, max_value=100.0, step=1.0, key="edit_weather_chance_precip_pct")
+                st.text_input("Precipitation Type", key="edit_weather_precip_type")
+                st.text_input("Precipitation Amount", key="edit_weather_precip_amount")
+                st.text_input("Stability Class", key="edit_weather_stability_class")
+                st.number_input("Maximum LVORI", min_value=0.0, step=1.0, key="edit_weather_max_lvori")
+                st.text_input("Dispersion Category", key="edit_weather_dispersion_category")
+                st.text_area("Forecast Remarks", key="edit_weather_remarks")
+
+        with edit_tabs[4]:
+            a, b = st.columns(2)
+            with a:
+                st.text_area("Smoke Sensitive Areas", key="edit_smoke_sensitive_areas", height=100)
+                current_night = st.session_state.get("edit_nighttime_smoke_screening", "")
+                night_options = ["", "Yes", "No"]
+                night_index = night_options.index(current_night) if current_night in night_options else 0
+                st.selectbox("Nighttime Smoke Screening", night_options, index=night_index, key="edit_nighttime_smoke_screening")
+                st.text_area("Smoke Precautions / Management Plan", key="edit_smoke_precautions", height=120)
+            with b:
+                st.text_area("Special Precautions", key="edit_special_precautions", height=120)
+                st.text_area("Emergency Resources", key="edit_emergency_resources", height=120)
+
+        with edit_tabs[5]:
+            st.text_area("Ignition Techniques / Sequence / Holding Plan", key="edit_ignition_techniques", height=150)
+            st.text_area("Breach Potential / Escape Risk", key="edit_breach_potential", height=120)
+
+        with edit_tabs[6]:
+            st.caption("Observed values are the actual day-of-burn record and remain separate from the county forecast.")
+            a, b, c = st.columns(3)
+            with a:
+                st.text_input("Actual Burn Date", key="edit_actual_burn_date")
+                st.text_input("Start Time", key="edit_start_time")
+                st.text_input("Completion Time", key="edit_completion_time")
+                st.text_input("Hours to Complete", key="edit_hours_to_complete")
+            with b:
+                st.text_input("Observed Surface Wind", key="edit_observed_surface_wind")
+                st.text_input("Observed RH", key="edit_observed_humidity")
+                st.text_input("Observed Temperature", key="edit_observed_temperature")
+                st.text_input("Observed Transport Wind", key="edit_observed_transport_wind")
+            with c:
+                st.text_input("Observed Mixing Height", key="edit_observed_mixing_height")
+                st.text_input("Observed Dispersion Index", key="edit_observed_dispersion_index")
+                st.text_input("Observed Fine Fuel Moisture", key="edit_observed_fine_fuel_moisture")
+                st.text_input("Observed KBDI", key="edit_observed_kbdi")
+                st.text_input("Observed / Expected Flame Length", key="edit_flame_length")
+                st.text_input("Permit Number", key="edit_permit_number")
+
+            st.markdown("#### Approval")
+            a, b = st.columns(2)
+            with a:
+                st.text_input("Prepared By - Name", key="edit_prepared_by_name")
+                st.text_input("Prepared By - Date", key="edit_prepared_by_date")
+            with b:
+                st.text_input("Witnessed By - Name", key="edit_witnessed_by_name")
+                st.text_input("Witnessed By - Date", key="edit_witnessed_by_date")
+
+        def _editor_dataclasses():
+            input_values = {}
+            for field_name, field_def in BurnInputs.__dataclass_fields__.items():
+                input_values[field_name] = st.session_state.get(f"edit_{field_name}", field_def.default)
+            weather_values = {}
+            numeric_weather = {
+                "surface_wind_mph", "min_rh", "max_temp_f", "transport_wind_mph",
+                "mixing_height_ft", "dispersion_index", "kbdi", "chance_precip_pct", "max_lvori"
             }
-            updated_bytes = json.dumps(updated_payload, indent=2).encode("utf-8")
-            safe_loaded_name = (saved_inputs.tract_name or "draft").replace("/", "-").replace("\\", "-")
+            for field_name, field_def in WeatherInputs.__dataclass_fields__.items():
+                value = st.session_state.get(f"edit_weather_{field_name}", field_def.default)
+                if field_name in numeric_weather and value in (0, 0.0, ""):
+                    value = None
+                weather_values[field_name] = value
+            return BurnInputs(**input_values), WeatherInputs(**weather_values)
+
+        with edit_tabs[7]:
+            edited_inputs, edited_weather = _editor_dataclasses()
+            updated_project = {
+                "format": "BurnPlan AI Project",
+                "version": "3.1.3",
+                "saved_at": datetime.now().isoformat(timespec="seconds"),
+                "burn_inputs": asdict(edited_inputs),
+                "forecast_weather": asdict(edited_weather),
+            }
+            updated_bytes = json.dumps(updated_project, indent=2).encode("utf-8")
+            safe_loaded_name = (edited_inputs.tract_name or "draft").replace("/", "-").replace("\\", "-")
 
             st.download_button(
-                "Download Updated BurnPlan Record",
+                "Download Updated Complete Project",
                 data=updated_bytes,
-                file_name=f"burnplan_record_{safe_loaded_name}_updated.json",
+                file_name=f"{safe_loaded_name}.burnplan",
                 mime="application/json",
                 use_container_width=True,
             )
 
-            e1, e2 = st.columns(2)
-            with e1:
-                if st.button("Generate Updated Final PDF", type="primary", use_container_width=True):
-                    pdf_out = export_pdf(saved_inputs, saved_weather, Path("outputs") / f"burn_plan_{safe_loaded_name}_final.pdf", use_ai=use_ai)
+            a, b = st.columns(2)
+            with a:
+                if st.button("Generate Updated PDF", type="primary", use_container_width=True, key="editor_generate_pdf"):
+                    pdf_out = export_pdf(edited_inputs, edited_weather, Path("outputs") / f"burn_plan_{safe_loaded_name}_updated.pdf", use_ai=use_ai)
                     with open(pdf_out, "rb") as f:
-                        st.download_button("Download Updated Final PDF", f.read(), file_name=pdf_out.name, mime="application/pdf", use_container_width=True)
-            with e2:
-                if st.button("Generate Updated Excel Record", use_container_width=True):
-                    xlsx_out = fill_template(saved_inputs, saved_weather, Path("outputs") / f"burn_plan_{safe_loaded_name}_final.xlsx", use_ai=use_ai)
+                        st.download_button("Download Updated PDF", f.read(), file_name=pdf_out.name, mime="application/pdf", use_container_width=True)
+            with b:
+                if st.button("Generate Updated Excel", use_container_width=True, key="editor_generate_excel"):
+                    xlsx_out = fill_template(edited_inputs, edited_weather, Path("outputs") / f"burn_plan_{safe_loaded_name}_updated.xlsx", use_ai=use_ai)
                     with open(xlsx_out, "rb") as f:
-                        st.download_button("Download Updated Excel Record", f.read(), file_name=xlsx_out.name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
-        except Exception as exc:
-            st.error(f"Could not open the saved BurnPlan record: {exc}")
+                        st.download_button("Download Updated Excel", f.read(), file_name=xlsx_out.name, mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
+
