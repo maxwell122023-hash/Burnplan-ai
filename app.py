@@ -240,7 +240,7 @@ with tabs[5]:
     st.markdown("#### Simple Smoke Screening")
     st.link_button(
         "Open Simple Smoke Screening Tool",
-        "https://efire.cnr.ncsu.edu/efire/weather-smoke/",
+        "https://weather.fdacs.gov/Simple-Smoke/index.html",
         use_container_width=True,
     )
     st.caption("Complete the external screening, then record the result and attach a map or screenshot to the editable project.")
@@ -599,7 +599,7 @@ with tabs[10]:
                 night_options = ["", "Yes", "No"]
                 night_index = night_options.index(current_night) if current_night in night_options else 0
                 st.selectbox("Nighttime Smoke Screening", night_options, index=night_index, key="edit_nighttime_smoke_screening")
-                st.link_button("Open Simple Smoke Screening Tool", "https://efire.cnr.ncsu.edu/efire/weather-smoke/", use_container_width=True)
+                st.link_button("Open Simple Smoke Screening Tool", "https://weather.fdacs.gov/Simple-Smoke/index.html", use_container_width=True)
                 completed_options = ["", "Yes", "No"]
                 completed_current = st.session_state.get("edit_simple_smoke_screen_completed", "")
                 st.selectbox("Simple Smoke Screening Completed", completed_options, index=completed_options.index(completed_current) if completed_current in completed_options else 0, key="edit_simple_smoke_screen_completed")
