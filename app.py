@@ -27,6 +27,7 @@ TOPOGRAPHY_TYPES = ["", "Flat", "Gently rolling", "Rolling", "Steep", "Bottomlan
 BURN_OBJECTIVES = ["Hazardous fuel reduction", "Site preparation", "Hardwood control", "Sweetgum control", "Wildlife habitat improvement", "Native warm-season grass enhancement", "Pine stand management", "Reduce midstory competition", "Pre-marking visibility", "Training / demonstration burn", "Other"]
 EQUIPMENT = ["Type 6 engine", "Water tank / slip-on unit", "UTV", "ATV", "Dozer", "Tractor", "Disk", "Backpack blower", "Leaf blower", "Drip torches", "Radios", "Hand tools", "Chainsaw", "PPE", "First aid kit"]
 PERSONNEL_ROLES = ["Burn Boss", "Ignition Boss", "Holding Boss", "Ignition Crew", "Holding Crew", "Engine Operator", "Dozer Operator", "Lookout / Weather", "Traffic Control", "EMS / First Aid"]
+MULTI_PERSONNEL_ROLES = {"Ignition Crew", "Holding Crew"}
 PERSONNEL_NAMES = ["", "James Tolbert", "Brian Seale", "Dalton Hand", "Noah Runyan", "Chris Wyatt", "Brandon Thompson", "Roger Cabaniss", "John Bevel", "TC Miller"]
 
 def personnel_options(current=""):
@@ -286,9 +287,28 @@ with tabs[6]:
     role_values = []
     for role in PERSONNEL_ROLES:
         c1, c2 = st.columns([1, 2])
-        with c1: st.text(role)
-        with c2: name = st.selectbox(f"Name for {role}", PERSONNEL_NAMES, key=f"role_{role}", label_visibility="collapsed")
-        if name: role_values.append(f"{role}: {name}")
+        with c1:
+            st.text(role)
+        with c2:
+            if role in MULTI_PERSONNEL_ROLES:
+                names = st.multiselect(
+                    f"Names for {role}",
+                    [name for name in PERSONNEL_NAMES if name],
+                    key=f"role_{role}",
+                    label_visibility="collapsed",
+                    placeholder="Select one or more crew members",
+                )
+                if names:
+                    role_values.append(f"{role}: {', '.join(names)}")
+            else:
+                name = st.selectbox(
+                    f"Name for {role}",
+                    PERSONNEL_NAMES,
+                    key=f"role_{role}",
+                    label_visibility="collapsed",
+                )
+                if name:
+                    role_values.append(f"{role}: {name}")
     st.subheader("Equipment")
     selected_equipment = st.multiselect("Equipment on Site", EQUIPMENT, default=["Water tank / slip-on unit", "UTV", "Drip torches", "Radios", "Hand tools", "PPE"])
     additional_equipment = st.text_area("Additional Equipment / Notes", height=80)
@@ -405,7 +425,7 @@ with tabs[10]:
     # plan inputs and the separate NWS county forecast, but not the rendered PDF.
     complete_payload = {
         "format": "BurnPlan AI Project",
-        "version": "3.1.4",
+        "version": "3.1.7",
         "saved_at": datetime.now().isoformat(timespec="seconds"),
         "burn_inputs": asdict(inputs),
         "forecast_weather": asdict(weather),
@@ -695,7 +715,7 @@ with tabs[10]:
             edited_inputs, edited_weather = _editor_dataclasses()
             updated_project = {
                 "format": "BurnPlan AI Project",
-                "version": "3.1.4",
+                "version": "3.1.7",
                 "saved_at": datetime.now().isoformat(timespec="seconds"),
                 "burn_inputs": asdict(edited_inputs),
                 "forecast_weather": asdict(edited_weather),
