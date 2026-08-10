@@ -27,6 +27,15 @@ TOPOGRAPHY_TYPES = ["", "Flat", "Gently rolling", "Rolling", "Steep", "Bottomlan
 BURN_OBJECTIVES = ["Hazardous fuel reduction", "Site preparation", "Hardwood control", "Sweetgum control", "Wildlife habitat improvement", "Native warm-season grass enhancement", "Pine stand management", "Reduce midstory competition", "Pre-marking visibility", "Training / demonstration burn", "Other"]
 EQUIPMENT = ["Type 6 engine", "Water tank / slip-on unit", "UTV", "ATV", "Dozer", "Tractor", "Disk", "Backpack blower", "Leaf blower", "Drip torches", "Radios", "Hand tools", "Chainsaw", "PPE", "First aid kit"]
 PERSONNEL_ROLES = ["Burn Boss", "Ignition Boss", "Holding Boss", "Ignition Crew", "Holding Crew", "Engine Operator", "Dozer Operator", "Lookout / Weather", "Traffic Control", "EMS / First Aid"]
+PERSONNEL_NAMES = ["", "James Tolbert", "Brian Seale", "Dalton Hand", "Noah Runyan", "Chris Wyatt", "Brandon Thompson", "Roger Cabaniss", "John Bevel", "TC Miller"]
+
+def personnel_options(current=""):
+    """Return the permanent personnel list while preserving a name from an older saved plan."""
+    options = PERSONNEL_NAMES.copy()
+    if current and current not in options:
+        options.append(current)
+    return options
+
 IGNITION_METHODS = ["", "Backing fire", "Flanking fire", "Strip-head fire", "Ring fire", "Spot ignition", "Grid ignition", "Combination"]
 SPECIAL_PRECAUTIONS = ["Shooting houses", "Game cameras", "Orchards", "TES species to protect", "Snags", "Power lines / wooden poles", "Gas lines", "Heavy fuel near line", "Public roads", "Adjacent homes", "Outbuildings", "Gates / access control", "Passive firelines checked", "Neighbor notification", "Firelines inspected", "Buried cable", "Wooden fence posts", "Cemetery", "Bee hives", "Feeders", "Equipment in the woods", "Livestock", "Thatch under green grass"]
 
@@ -68,7 +77,7 @@ with tabs[0]:
         burn_address = st.text_input("Burn Address / Property Location")
         county = st.selectbox("County", ALABAMA_COUNTIES, index=ALABAMA_COUNTIES.index("Dallas"))
         state = st.selectbox("State", ["AL"], index=0)
-        prepared_by = st.text_input("Plan Prepared By")
+        prepared_by = st.selectbox("Plan Prepared By", PERSONNEL_NAMES)
     with c2:
         latitude = st.number_input("Latitude", value=32.4074, format="%.6f")
         longitude = st.number_input("Longitude", value=-87.0211, format="%.6f")
@@ -81,7 +90,7 @@ with tabs[0]:
 with tabs[1]:
     c1, c2 = st.columns(2)
     with c1:
-        burn_mgr_name = st.text_input("Burn Manager Name")
+        burn_mgr_name = st.selectbox("Burn Manager Name", PERSONNEL_NAMES)
         burn_mgr_cert = st.text_input("Burn Manager Certification #")
         burn_mgr_phone = st.text_input("Burn Manager Phone")
     with c2:
@@ -278,7 +287,7 @@ with tabs[6]:
     for role in PERSONNEL_ROLES:
         c1, c2 = st.columns([1, 2])
         with c1: st.text(role)
-        with c2: name = st.text_input(f"Name for {role}", key=f"role_{role}", label_visibility="collapsed")
+        with c2: name = st.selectbox(f"Name for {role}", PERSONNEL_NAMES, key=f"role_{role}", label_visibility="collapsed")
         if name: role_values.append(f"{role}: {name}")
     st.subheader("Equipment")
     selected_equipment = st.multiselect("Equipment on Site", EQUIPMENT, default=["Water tank / slip-on unit", "UTV", "Drip torches", "Radios", "Hand tools", "PPE"])
@@ -316,11 +325,11 @@ with tabs[9]:
     st.subheader("Plan Approval")
     s1, s2 = st.columns(2)
     with s1:
-        prepared_by_name = st.text_input("Prepared By - Name")
+        prepared_by_name = st.selectbox("Prepared By - Name", PERSONNEL_NAMES)
         prepared_by_date = st.text_input("Prepared By - Date")
         st.caption("Signature line will be added to the PDF.")
     with s2:
-        witnessed_by_name = st.text_input("Witnessed By - Name")
+        witnessed_by_name = st.selectbox("Witnessed By - Name", PERSONNEL_NAMES)
         witnessed_by_date = st.text_input("Witnessed By - Date")
         st.caption("Signature line will be added to the PDF.")
 
@@ -469,7 +478,9 @@ with tabs[10]:
                 county_index = ALABAMA_COUNTIES.index(current_county) if current_county in ALABAMA_COUNTIES else 0
                 st.selectbox("County", ALABAMA_COUNTIES, index=county_index, key="edit_county")
                 st.selectbox("State", ["AL"], key="edit_state")
-                st.text_input("Plan Prepared By", key="edit_prepared_by")
+                current_prepared = st.session_state.get("edit_prepared_by", "")
+                prepared_options = personnel_options(current_prepared)
+                st.selectbox("Plan Prepared By", prepared_options, index=prepared_options.index(current_prepared) if current_prepared in prepared_options else 0, key="edit_prepared_by")
                 current_type = st.session_state.get("edit_burn_type", "")
                 type_index = BURN_TYPES.index(current_type) if current_type in BURN_TYPES else 0
                 st.selectbox("Burn Type", BURN_TYPES, index=type_index, key="edit_burn_type")
@@ -477,7 +488,9 @@ with tabs[10]:
                 st.number_input("Latitude", format="%.6f", key="edit_latitude")
                 st.number_input("Longitude", format="%.6f", key="edit_longitude")
                 st.number_input("Burn Acres", min_value=0.0, step=1.0, key="edit_burn_acres")
-                st.text_input("Burn Manager Name", key="edit_burn_mgr_name")
+                current_manager = st.session_state.get("edit_burn_mgr_name", "")
+                manager_options = personnel_options(current_manager)
+                st.selectbox("Burn Manager Name", manager_options, index=manager_options.index(current_manager) if current_manager in manager_options else 0, key="edit_burn_mgr_name")
                 st.text_input("Burn Manager Certification #", key="edit_burn_mgr_cert")
                 st.text_input("Burn Manager Phone", key="edit_burn_mgr_phone")
                 st.text_area("Executor / Landowner Mailing Address", key="edit_executers_mailing_address")
@@ -652,10 +665,14 @@ with tabs[10]:
             st.markdown("#### Approval")
             a, b = st.columns(2)
             with a:
-                st.text_input("Prepared By - Name", key="edit_prepared_by_name")
+                current_approval_prepared = st.session_state.get("edit_prepared_by_name", "")
+                approval_prepared_options = personnel_options(current_approval_prepared)
+                st.selectbox("Prepared By - Name", approval_prepared_options, index=approval_prepared_options.index(current_approval_prepared) if current_approval_prepared in approval_prepared_options else 0, key="edit_prepared_by_name")
                 st.text_input("Prepared By - Date", key="edit_prepared_by_date")
             with b:
-                st.text_input("Witnessed By - Name", key="edit_witnessed_by_name")
+                current_witness = st.session_state.get("edit_witnessed_by_name", "")
+                witness_options = personnel_options(current_witness)
+                st.selectbox("Witnessed By - Name", witness_options, index=witness_options.index(current_witness) if current_witness in witness_options else 0, key="edit_witnessed_by_name")
                 st.text_input("Witnessed By - Date", key="edit_witnessed_by_date")
 
         def _editor_dataclasses():
